@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output
+assets/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WordPress
+*.log

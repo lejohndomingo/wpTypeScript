@@ -1,0 +1,36 @@
+<?php
+/**
+ * Front Page Template
+ * 
+ * @package wpTypeScript
+ */
+
+if (!defined('ABSPATH')) {
+    exit; // Exit if accessed directly
+}
+
+get_header();
+?>
+
+<main class="site-content">
+    <?php if (have_posts()) : ?>
+        <?php while (have_posts()) : the_post(); ?>
+            <article id="post-<?php the_ID(); ?>" <?php post_class(); ?>>
+                <header class="entry-header">
+                    <?php the_title('<h2 class="entry-title">', '</h2>'); ?>
+                </header>
+                
+                <div class="entry-content">
+                    <?php the_content(); ?>
+                </div>
+            </article>
+        <?php endwhile; ?>
+        
+        <?php the_posts_pagination(); ?>
+    <?php else : ?>
+        <p><?php _e('No posts found.', 'wptypescript'); ?></p>
+    <?php endif; ?>
+</main>
+
+<?php
+get_footer();

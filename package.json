@@ -1,0 +1,21 @@
+{
+  "name": "wptypescript-theme",
+  "version": "1.0.0",
+  "description": "WordPress theme with TypeScript and modern build setup",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "sass": "^1.71.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0"
+  },
+  "keywords": ["wordpress", "theme", "typescript", "vite"],
+  "author": "",
+  "license": "GPL-2.0-or-later"
+}
