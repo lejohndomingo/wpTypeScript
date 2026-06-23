@@ -22,6 +22,14 @@ function wptypescript_enqueue_assets() {
         array(),
         $theme_version
     );
+
+    // Enqueue root stylesheet with theme option CSS selectors
+    wp_enqueue_style(
+        'wptypescript-root-style',
+        get_stylesheet_uri(),
+        array('wptypescript-styles'),
+        $theme_version
+    );
     
     // Enqueue compiled JavaScript
     wp_enqueue_script(
@@ -48,8 +56,26 @@ function wptypescript_admin_enqueue_assets($hook) {
         return;
     }
     
+    $theme_version = wp_get_theme()->get('Version');
+    
+    // Enqueue Theme Options admin CSS
+    wp_enqueue_style(
+        'wptypescript-admin',
+        get_template_directory_uri() . '/assets/css/admin.css',
+        array(),
+        $theme_version
+    );
+    
     wp_enqueue_style('wp-color-picker');
-    wp_enqueue_script('wp-color-picker', array('jquery'));
+    wp_enqueue_script('wp-color-picker', false, array('jquery'));
+    wp_enqueue_media();
+    wp_enqueue_script(
+        'wptypescript-admin-script',
+        get_template_directory_uri() . '/assets/js/admin.js',
+        array('wp-color-picker'),
+        $theme_version,
+        true
+    );
 }
 add_action('admin_enqueue_scripts', 'wptypescript_admin_enqueue_assets');
 
@@ -195,17 +221,65 @@ function wptypescript_register_settings() {
         'sanitize_callback' => 'sanitize_hex_color',
         'default' => '#ffffff',
     ));
-    
-    register_setting('wptypescript_options', 'wptypescript_heading_font', array(
+
+    register_setting('wptypescript_options', 'wptypescript_background_image', array(
         'type' => 'string',
-        'sanitize_callback' => 'sanitize_text_field',
-        'default' => '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif',
+        'sanitize_callback' => 'esc_url_raw',
+        'default' => '',
     ));
-    
-    register_setting('wptypescript_options', 'wptypescript_body_font', array(
+
+    register_setting('wptypescript_options', 'wptypescript_background_image_id', array(
+        'type' => 'integer',
+        'sanitize_callback' => 'absint',
+        'default' => 0,
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_background_image_size', array(
         'type' => 'string',
         'sanitize_callback' => 'sanitize_text_field',
-        'default' => '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif',
+        'default' => 'cover',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_background_overlay_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_gradient_top_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_gradient_center_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_gradient_bottom_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_link_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '#0073aa',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_link_hover_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '#005b8f',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_link_style', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'underline',
     ));
     
     // Header Builder Settings
@@ -264,6 +338,30 @@ function wptypescript_register_settings() {
         'sanitize_callback' => 'sanitize_text_field',
         'default' => '28',
     ));
+
+    register_setting('wptypescript_options', 'wptypescript_h4_size', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '22',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_h5_size', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '18',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_h6_size', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '16',
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_p_size', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '16',
+    ));
     
     register_setting('wptypescript_options', 'wptypescript_body_size', array(
         'type' => 'string',
@@ -276,18 +374,53 @@ function wptypescript_register_settings() {
         'sanitize_callback' => 'sanitize_text_field',
         'default' => '1.6',
     ));
-    
-    register_setting('wptypescript_options', 'wptypescript_heading_font_weight', array(
+
+    // Allow admins to add custom Google Fonts (comma-separated names)
+    register_setting('wptypescript_options', 'wptypescript_custom_google_fonts', array(
         'type' => 'string',
         'sanitize_callback' => 'sanitize_text_field',
-        'default' => '700',
+        'default' => '',
     ));
-    
-    register_setting('wptypescript_options', 'wptypescript_heading_font_style', array(
-        'type' => 'string',
-        'sanitize_callback' => 'sanitize_text_field',
-        'default' => 'normal',
-    ));
+
+    // Per-heading font family / weight / style / color / line-height (H1-H6 and P)
+    $headings = array('h1','h2','h3','h4','h5','h6','p');
+    foreach ($headings as $h) {
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_font_family', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => '',
+        ));
+
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_font_weight', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => 'inherit',
+        ));
+
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_font_style', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => 'normal',
+        ));
+
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_color', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_hex_color',
+            'default' => '',
+        ));
+
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_letter_spacing', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => '',
+        ));
+
+        register_setting('wptypescript_options', 'wptypescript_' . $h . '_line_height', array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => '1.3',
+        ));
+    }
     
     // Sidebar Layout
     register_setting('wptypescript_options', 'wptypescript_default_layout', array(
@@ -505,6 +638,189 @@ function wptypescript_options_page() {
                                 <p class="description"><?php _e('Main background color for the site', 'wptypescript'); ?></p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_background_image"><?php _e('Background Image', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                    <div style="flex: 1;">
+                                        <input type="text"
+                                               id="wptypescript_background_image"
+                                               name="wptypescript_background_image"
+                                               value="<?php echo esc_attr(get_option('wptypescript_background_image', '')); ?>"
+                                               class="regular-text"
+                                               placeholder="https://example.com/image.jpg">
+                                        <input type="hidden"
+                                               id="wptypescript_background_image_id"
+                                               name="wptypescript_background_image_id"
+                                               value="<?php echo esc_attr(get_option('wptypescript_background_image_id', '')); ?>">
+                                    </div>
+                                    <button type="button" id="wptypescript_background_image_button" class="button button-primary" style="margin-top: 0;"><?php _e('Upload Image', 'wptypescript'); ?></button>
+                                </div>
+                                <p class="description"><?php _e('Enter the URL or upload an image. You can enter the URL manually or use the Upload Image button to select from the media library.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_background_image_size"><?php _e('Background Image Style', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <select id="wptypescript_background_image_size" name="wptypescript_background_image_size">
+                                    <option value="cover" <?php selected(get_option('wptypescript_background_image_size', 'cover'), 'cover'); ?>><?php _e('Cover', 'wptypescript'); ?></option>
+                                    <option value="contain" <?php selected(get_option('wptypescript_background_image_size', 'cover'), 'contain'); ?>><?php _e('Contain', 'wptypescript'); ?></option>
+                                    <option value="auto" <?php selected(get_option('wptypescript_background_image_size', 'cover'), 'auto'); ?>><?php _e('Auto', 'wptypescript'); ?></option>
+                                </select>
+                                <p class="description"><?php _e('Choose how the background image is sized.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_background_overlay_color"><?php _e('Background Overlay Color', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <input type="color"
+                                       id="wptypescript_background_overlay_color"
+                                       name="wptypescript_background_overlay_color"
+                                       value="<?php echo esc_attr(get_option('wptypescript_background_overlay_color', '')); ?>"
+                                       class="color-picker">
+                                <p class="description"><?php _e('Optional overlay color for the background image.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label><?php _e('Gradient Colors', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <p class="description" style="margin-bottom: 12px;"><?php _e('Create an optional gradient overlay on top of the background.', 'wptypescript'); ?></p>
+                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                                    <div>
+                                        <label for="wptypescript_gradient_top_color" style="display: block; margin-bottom: 4px; font-weight: 500;"><?php _e('Top Color', 'wptypescript'); ?></label>
+                                        <input type="color"
+                                               id="wptypescript_gradient_top_color"
+                                               name="wptypescript_gradient_top_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_gradient_top_color', '')); ?>"
+                                               class="color-picker"
+                                               style="width: 100%; height: 40px; cursor: pointer;">
+                                    </div>
+                                    <div>
+                                        <label for="wptypescript_gradient_center_color" style="display: block; margin-bottom: 4px; font-weight: 500;"><?php _e('Center Color', 'wptypescript'); ?></label>
+                                        <input type="color"
+                                               id="wptypescript_gradient_center_color"
+                                               name="wptypescript_gradient_center_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_gradient_center_color', '')); ?>"
+                                               class="color-picker"
+                                               style="width: 100%; height: 40px; cursor: pointer;">
+                                    </div>
+                                    <div>
+                                        <label for="wptypescript_gradient_bottom_color" style="display: block; margin-bottom: 4px; font-weight: 500;"><?php _e('Bottom Color', 'wptypescript'); ?></label>
+                                        <input type="color"
+                                               id="wptypescript_gradient_bottom_color"
+                                               name="wptypescript_gradient_bottom_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_gradient_bottom_color', '')); ?>"
+                                               class="color-picker"
+                                               style="width: 100%; height: 40px; cursor: pointer;">
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <?php _e('Background Preview', 'wptypescript'); ?>
+                            </th>
+                            <td>
+                                <?php
+                                $bg_image = esc_attr(get_option('wptypescript_background_image', ''));
+                                $bg_size = esc_attr(get_option('wptypescript_background_image_size', 'cover'));
+                                $bg_overlay = esc_attr(get_option('wptypescript_background_overlay_color', ''));
+                                $bg_color = esc_attr(get_option('wptypescript_background_color', '#ffffff'));
+                                $grad_top = esc_attr(get_option('wptypescript_gradient_top_color', ''));
+                                $grad_center = esc_attr(get_option('wptypescript_gradient_center_color', ''));
+                                $grad_bottom = esc_attr(get_option('wptypescript_gradient_bottom_color', ''));
+                                
+                                $gradient_css = '';
+                                if ($grad_top || $grad_center || $grad_bottom) {
+                                    $stops = array();
+                                    if ($grad_top) $stops[] = $grad_top . ' 0%';
+                                    if ($grad_center) $stops[] = $grad_center . ' 50%';
+                                    if ($grad_bottom) $stops[] = $grad_bottom . ' 100%';
+                                    if (!empty($stops)) {
+                                        $gradient_css = 'linear-gradient(to bottom, ' . implode(', ', $stops) . ')';
+                                    }
+                                }
+                                ?>
+                                <div class="wptypescript-background-preview-wrap" style="position: relative; width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background-color: <?php echo $bg_color; ?>;">
+                                    <?php if ($bg_image) : ?>
+                                        <div style="position: absolute; inset: 0; background-image: url(<?php echo $bg_image; ?>); background-size: <?php echo $bg_size; ?>; background-repeat: no-repeat; background-position: center center;"></div>
+                                    <?php endif; ?>
+                                    <?php if ($bg_overlay) : ?>
+                                        <div style="position: absolute; inset: 0; background-color: <?php echo $bg_overlay; ?>; opacity: 0.7;"></div>
+                                    <?php endif; ?>
+                                    <?php if ($gradient_css) : ?>
+                                        <div style="position: absolute; inset: 0; background: <?php echo $gradient_css; ?>; opacity: 0.8;"></div>
+                                    <?php endif; ?>
+                                </div>
+                                <p class="description" style="margin-top: 8px;"><?php _e('Live preview of your selected background image, overlay, and gradient.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_link_color"><?php _e('Content Link Color', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <input type="color"
+                                       id="wptypescript_link_color"
+                                       name="wptypescript_link_color"
+                                       value="<?php echo esc_attr(get_option('wptypescript_link_color', '#0073aa')); ?>"
+                                       class="color-picker">
+                                <p class="description"><?php _e('Color used for content links throughout the site.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_link_style"><?php _e('Content Link Style', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <select id="wptypescript_link_style" name="wptypescript_link_style">
+                                    <option value="underline" <?php selected(get_option('wptypescript_link_style', 'underline'), 'underline'); ?>><?php _e('Underline', 'wptypescript'); ?></option>
+                                    <option value="none" <?php selected(get_option('wptypescript_link_style', 'underline'), 'none'); ?>><?php _e('No Underline', 'wptypescript'); ?></option>
+                                    <option value="overline" <?php selected(get_option('wptypescript_link_style', 'underline'), 'overline'); ?>><?php _e('Overline', 'wptypescript'); ?></option>
+                                    <option value="underline overline" <?php selected(get_option('wptypescript_link_style', 'underline'), 'underline overline'); ?>><?php _e('Underline + Overline', 'wptypescript'); ?></option>
+                                </select>
+                                <p class="description"><?php _e('Choose the default decoration style for content links.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_link_hover_color"><?php _e('Content Link Hover Color', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <input type="color"
+                                       id="wptypescript_link_hover_color"
+                                       name="wptypescript_link_hover_color"
+                                       value="<?php echo esc_attr(get_option('wptypescript_link_hover_color', '#005b8f')); ?>"
+                                       class="color-picker">
+                                <p class="description"><?php _e('Hover color for content links.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <?php _e('Link Preview', 'wptypescript'); ?>
+                            </th>
+                            <td>
+                                <?php
+                                $preview_link_color = esc_attr(get_option('wptypescript_link_color', '#0073aa'));
+                                $preview_link_hover_color = esc_attr(get_option('wptypescript_link_hover_color', '#005b8f'));
+                                $preview_link_style = esc_attr(get_option('wptypescript_link_style', 'underline'));
+                                ?>
+                                <div class="wptypescript-link-preview-wrap">
+                                    <a href="#" onclick="return false;" class="wptypescript-link-preview" style="color: <?php echo $preview_link_color; ?>; text-decoration: <?php echo $preview_link_style; ?>; --link-hover-color: <?php echo $preview_link_hover_color; ?>;">
+                                        <?php _e('This is a sample link', 'wptypescript'); ?>
+                                    </a>
+                                    <p class="description"><?php _e('Hover over the sample link to preview the selected colors and decoration.', 'wptypescript'); ?></p>
+                                </div>
+                            </td>
+                        </tr>
                     </table>
                 </div>
                 </div>
@@ -582,163 +898,153 @@ function wptypescript_options_page() {
                 <div class="card">
                     <h2><?php _e('Typography', 'wptypescript'); ?></h2>
                     <table class="form-table">
+
                         <tr>
                             <th scope="row">
-                                <label for="wptypescript_heading_font"><?php _e('Heading Font Family', 'wptypescript'); ?></label>
+                                <label for="wptypescript_custom_google_fonts"><?php _e('Custom Google Fonts', 'wptypescript'); ?></label>
                             </th>
                             <td>
-                                <select id="wptypescript_heading_font" name="wptypescript_heading_font">
-                                    <option value="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" <?php selected(get_option('wptypescript_heading_font'), '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif'); ?>>
-                                        <?php _e('System Sans-Serif', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Georgia', 'Times New Roman', Times, serif" <?php selected(get_option('wptypescript_heading_font'), "'Georgia', 'Times New Roman', Times, serif"); ?>>
-                                        <?php _e('Georgia / Times', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Arial', 'Helvetica Neue', Helvetica, sans-serif" <?php selected(get_option('wptypescript_heading_font'), "'Arial', 'Helvetica Neue', Helvetica, sans-serif"); ?>>
-                                        <?php _e('Arial / Helvetica', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, sans-serif" <?php selected(get_option('wptypescript_heading_font'), "'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, sans-serif"); ?>>
-                                        <?php _e('Trebuchet MS', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Verdana', Geneva, sans-serif" <?php selected(get_option('wptypescript_heading_font'), "'Verdana', Geneva, sans-serif"); ?>>
-                                        <?php _e('Verdana', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Courier New', Courier, monospace" <?php selected(get_option('wptypescript_heading_font'), "'Courier New', Courier, monospace"); ?>>
-                                        <?php _e('Courier New', 'wptypescript'); ?>
-                                    </option>
-                                </select>
-                                <p class="description"><?php _e('Font family for headings (h1-h6)', 'wptypescript'); ?></p>
+                                <input type="text"
+                                       id="wptypescript_custom_google_fonts"
+                                       name="wptypescript_custom_google_fonts"
+                                       value="<?php echo esc_attr(get_option('wptypescript_custom_google_fonts', '')); ?>"
+                                       class="regular-text"
+                                       placeholder="e.g. Inter, Fira+Sans">
+                                <p class="description"><?php _e('Enter one or more Google Font family names, comma-separated. Use + for spaces where required (e.g. Inter, Fira+Sans). These fonts will be enqueued automatically.', 'wptypescript'); ?></p>
                             </td>
                         </tr>
+
+                        <!-- Per-heading controls for H1-H5 (compact grid) -->
+                        <?php
+                        $heading_font_options = array(
+                            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" => __('System Sans-Serif', 'wptypescript'),
+                            "'Georgia', 'Times New Roman', Times, serif" => __('Georgia / Times', 'wptypescript'),
+                            "'Arial', 'Helvetica Neue', Helvetica, sans-serif" => __('Arial / Helvetica', 'wptypescript'),
+                            "'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, sans-serif" => __('Trebuchet MS', 'wptypescript'),
+                            "'Verdana', Geneva, sans-serif" => __('Verdana', 'wptypescript'),
+                            "'Courier New', Courier, monospace" => __('Courier New', 'wptypescript'),
+                            "'Roboto', sans-serif" => __('Roboto (Google Font)', 'wptypescript'),
+                            "'Open Sans', sans-serif" => __('Open Sans (Google Font)', 'wptypescript'),
+                            "'Lato', sans-serif" => __('Lato (Google Font)', 'wptypescript'),
+                            "'Montserrat', sans-serif" => __('Montserrat (Google Font)', 'wptypescript'),
+                            "'Poppins', sans-serif" => __('Poppins (Google Font)', 'wptypescript'),
+                        );
+
+                        $weights = array('inherit','100','200','300','400','500','600','700','800','900');
+                        $styles = array('normal','italic','oblique');
+
+                        $controls = array('h1','h2','h3','h4','h5','h6','p');
+                        $defaults = array(
+                            'h1' => '48',
+                            'h2' => '36',
+                            'h3' => '28',
+                            'h4' => '22',
+                            'h5' => '18',
+                            'h6' => '16',
+                            'p' => get_option('wptypescript_body_size','16'),
+                        );
+                        $line_height_defaults = array(
+                            'h1' => '1.2',
+                            'h2' => '1.25',
+                            'h3' => '1.3',
+                            'h4' => '1.35',
+                            'h5' => '1.4',
+                            'h6' => '1.4',
+                            'p'  => '1.6',
+                        );
+
+                        foreach ($controls as $h) :
+                        ?>
                         <tr>
                             <th scope="row">
-                                <label for="wptypescript_heading_font_weight"><?php _e('Heading Font Weight', 'wptypescript'); ?></label>
+                                <label><?php echo strtoupper($h); ?> <?php _e('', 'wptypescript'); ?></label>
                             </th>
                             <td>
-                                <select id="wptypescript_heading_font_weight" name="wptypescript_heading_font_weight">
-                                    <option value="100" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '100'); ?>>
-                                        <?php _e('100 - Thin', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="200" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '200'); ?>>
-                                        <?php _e('200 - Extra Light', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="300" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '300'); ?>>
-                                        <?php _e('300 - Light', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="400" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '400'); ?>>
-                                        <?php _e('400 - Normal', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="500" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '500'); ?>>
-                                        <?php _e('500 - Medium', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="600" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '600'); ?>>
-                                        <?php _e('600 - Semi Bold', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="700" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '700'); ?>>
-                                        <?php _e('700 - Bold', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="800" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '800'); ?>>
-                                        <?php _e('800 - Extra Bold', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="900" <?php selected(get_option('wptypescript_heading_font_weight', '700'), '900'); ?>>
-                                        <?php _e('900 - Black', 'wptypescript'); ?>
-                                    </option>
-                                </select>
-                                <p class="description"><?php _e('Font weight for headings', 'wptypescript'); ?></p>
+                                <div class="wptypescript-heading-grid">
+                                    <div class="field family">
+                                        <label for="wptypescript_<?php echo $h; ?>_font_family"><?php _e('Family', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_<?php echo $h; ?>_font_family" name="wptypescript_<?php echo $h; ?>_font_family">
+                                            <?php foreach ($heading_font_options as $val => $label) : ?>
+                                                <option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('wptypescript_' . $h . '_font_family', "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif"), $val); ?>>
+                                                    <?php echo esc_html($label); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+
+                                    <div class="field weight">
+                                        <label for="wptypescript_<?php echo $h; ?>_font_weight"><?php _e('Weight', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_<?php echo $h; ?>_font_weight" name="wptypescript_<?php echo $h; ?>_font_weight">
+                                            <?php foreach ($weights as $w) : ?>
+                                                <option value="<?php echo $w; ?>" <?php selected(get_option('wptypescript_' . $h . '_font_weight', 'inherit'), $w); ?>>
+                                                    <?php echo esc_html($w); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+
+                                    <div class="field style">
+                                        <label for="wptypescript_<?php echo $h; ?>_font_style"><?php _e('Style', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_<?php echo $h; ?>_font_style" name="wptypescript_<?php echo $h; ?>_font_style">
+                                            <?php foreach ($styles as $s) : ?>
+                                                <option value="<?php echo esc_attr($s); ?>" <?php selected(get_option('wptypescript_' . $h . '_font_style', 'normal'), $s); ?>>
+                                                    <?php echo esc_html(ucfirst($s)); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+
+                                    <div class="field color">
+                                        <label for="wptypescript_<?php echo $h; ?>_color"><?php _e('Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_<?php echo $h; ?>_color"
+                                               name="wptypescript_<?php echo $h; ?>_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_' . $h . '_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#333333">
+                                    </div>
+
+                                    <div class="field letter-spacing">
+                                        <label for="wptypescript_<?php echo $h; ?>_letter_spacing"><?php _e('Letter Spacing (px)', 'wptypescript'); ?></label>
+                                        <input type="number"
+                                               id="wptypescript_<?php echo $h; ?>_letter_spacing"
+                                               name="wptypescript_<?php echo $h; ?>_letter_spacing"
+                                               value="<?php echo esc_attr(get_option('wptypescript_' . $h . '_letter_spacing', '')); ?>"
+                                               class="small-text"
+                                               min="-5"
+                                               max="20"
+                                               step="0.1"
+                                               placeholder="0">
+                                    </div>
+
+                                    <div class="field size">
+                                        <label for="wptypescript_<?php echo $h; ?>_size"><?php _e('Size (px)', 'wptypescript'); ?></label>
+                                        <input type="number"
+                                               id="wptypescript_<?php echo $h; ?>_size"
+                                               name="wptypescript_<?php echo $h; ?>_size"
+                                               value="<?php echo esc_attr(get_option('wptypescript_' . $h . '_size', $defaults[$h])); ?>"
+                                               class="small-text"
+                                               min="12"
+                                               max="200"
+                                               step="1">
+                                    </div>
+
+                                    <div class="field line-height">
+                                        <label for="wptypescript_<?php echo $h; ?>_line_height"><?php _e('Line Height', 'wptypescript'); ?></label>
+                                        <input type="number"
+                                               id="wptypescript_<?php echo $h; ?>_line_height"
+                                               name="wptypescript_<?php echo $h; ?>_line_height"
+                                               value="<?php echo esc_attr(get_option('wptypescript_' . $h . '_line_height', $line_height_defaults[$h])); ?>"
+                                               class="small-text"
+                                               min="1"
+                                               max="3"
+                                               step="0.05">
+                                    </div>
+                                </div>
                             </td>
                         </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="wptypescript_heading_font_style"><?php _e('Heading Font Style', 'wptypescript'); ?></label>
-                            </th>
-                            <td>
-                                <select id="wptypescript_heading_font_style" name="wptypescript_heading_font_style">
-                                    <option value="normal" <?php selected(get_option('wptypescript_heading_font_style', 'normal'), 'normal'); ?>>
-                                        <?php _e('Normal', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="italic" <?php selected(get_option('wptypescript_heading_font_style', 'normal'), 'italic'); ?>>
-                                        <?php _e('Italic', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="oblique" <?php selected(get_option('wptypescript_heading_font_style', 'normal'), 'oblique'); ?>>
-                                        <?php _e('Oblique', 'wptypescript'); ?>
-                                    </option>
-                                </select>
-                                <p class="description"><?php _e('Font style for headings', 'wptypescript'); ?></p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="wptypescript_body_font"><?php _e('Body Font', 'wptypescript'); ?></label>
-                            </th>
-                            <td>
-                                <select id="wptypescript_body_font" name="wptypescript_body_font">
-                                    <option value="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" <?php selected(get_option('wptypescript_body_font'), '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif'); ?>>
-                                        <?php _e('System Sans-Serif', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Georgia', 'Times New Roman', Times, serif" <?php selected(get_option('wptypescript_body_font'), "'Georgia', 'Times New Roman', Times, serif"); ?>>
-                                        <?php _e('Georgia / Times', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Arial', 'Helvetica Neue', Helvetica, sans-serif" <?php selected(get_option('wptypescript_body_font'), "'Arial', 'Helvetica Neue', Helvetica, sans-serif"); ?>>
-                                        <?php _e('Arial / Helvetica', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, sans-serif" <?php selected(get_option('wptypescript_body_font'), "'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, sans-serif"); ?>>
-                                        <?php _e('Trebuchet MS', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Verdana', Geneva, sans-serif" <?php selected(get_option('wptypescript_body_font'), "'Verdana', Geneva, sans-serif"); ?>>
-                                        <?php _e('Verdana', 'wptypescript'); ?>
-                                    </option>
-                                    <option value="'Courier New', Courier, monospace" <?php selected(get_option('wptypescript_body_font'), "'Courier New', Courier, monospace"); ?>>
-                                        <?php _e('Courier New', 'wptypescript'); ?>
-                                    </option>
-                                </select>
-                                <p class="description"><?php _e('Font family for body text', 'wptypescript'); ?></p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="wptypescript_h1_size"><?php _e('H1 Font Size (px)', 'wptypescript'); ?></label>
-                            </th>
-                            <td>
-                                <input type="number" 
-                                       id="wptypescript_h1_size" 
-                                       name="wptypescript_h1_size" 
-                                       value="<?php echo esc_attr(get_option('wptypescript_h1_size', '48')); ?>" 
-                                       class="small-text"
-                                       min="20"
-                                       max="100"
-                                       step="1">
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="wptypescript_h2_size"><?php _e('H2 Font Size (px)', 'wptypescript'); ?></label>
-                            </th>
-                            <td>
-                                <input type="number" 
-                                       id="wptypescript_h2_size" 
-                                       name="wptypescript_h2_size" 
-                                       value="<?php echo esc_attr(get_option('wptypescript_h2_size', '36')); ?>" 
-                                       class="small-text"
-                                       min="18"
-                                       max="80"
-                                       step="1">
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="wptypescript_h3_size"><?php _e('H3 Font Size (px)', 'wptypescript'); ?></label>
-                            </th>
-                            <td>
-                                <input type="number" 
-                                       id="wptypescript_h3_size" 
-                                       name="wptypescript_h3_size" 
-                                       value="<?php echo esc_attr(get_option('wptypescript_h3_size', '28')); ?>" 
-                                       class="small-text"
-                                       min="16"
-                                       max="60"
-                                       step="1">
-                            </td>
-                        </tr>
+                        <?php endforeach; ?>
+                        
                         <tr>
                             <th scope="row">
                                 <label for="wptypescript_body_size"><?php _e('Body Font Size (px)', 'wptypescript'); ?></label>
@@ -820,84 +1126,39 @@ function wptypescript_options_page() {
         </form>
     </div>
     
-    <style>
-        .wptypescript-tabs {
-            display: flex;
-            border-bottom: 1px solid #ccc;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        
-        .tab-button {
-            padding: 10px 20px;
-            background: none;
-            border: none;
-            border-bottom: 3px solid transparent;
-            cursor: pointer;
-            font-size: 13px;
-            color: #666;
-            transition: all 0.3s ease;
-        }
-        
-        .tab-button:hover {
-            color: #0073aa;
-            border-bottom-color: #0073aa;
-        }
-        
-        .tab-button.active {
-            color: #0073aa;
-            border-bottom-color: #0073aa;
-            font-weight: 600;
-        }
-        
-        .wptypescript-options-container {
-            max-width: 1200px;
-            font-size: 13px;
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .wptypescript-options-container .card {
-            padding: 20px;
-            border: 1px solid #ccd0d4;
-            background: #fff;
-            box-shadow: 0 1px 1px rgba(0,0,0,.04);
-            height: fit-content;
-        }
-        
-        .wptypescript-options-container .card h2 {
-            margin-top: 0;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #eee;
-            font-size: 1.1rem;
-        }
-        
-        .wptypescript-options-container label {
-            font-size: 13px;
-        }
-        
-        .wptypescript-options-container .description {
-            font-size: 12px;
-        }
-        
-        .color-picker {
-            width: 60px;
-            height: 40px;
-            padding: 0;
-            border: 1px solid #ccc;
-            cursor: pointer;
-        }
-    </style>
-    
     <script>
     jQuery(document).ready(function($) {
         $('.color-picker').wpColorPicker();
+        
+        // Background Image Media Uploader
+        var wptypescriptMediaFrame;
+        $('#wptypescript_background_image_button').on('click', function(e) {
+            e.preventDefault();
+            
+            if (wptypescriptMediaFrame) {
+                wptypescriptMediaFrame.open();
+                return;
+            }
+            
+            wptypescriptMediaFrame = wp.media({
+                title: wp.media.view.l10n.addMedia,
+                button: {
+                    text: wp.media.view.l10n.select
+                },
+                multiple: false,
+                library: {
+                    type: 'image'
+                }
+            });
+            
+            wptypescriptMediaFrame.on('select', function() {
+                var attachment = wptypescriptMediaFrame.state().get('selection').first().toJSON();
+                $('#wptypescript_background_image').val(attachment.url);
+                $('#wptypescript_background_image_id').val(attachment.id);
+            });
+            
+            wptypescriptMediaFrame.open();
+        });
         
         // Tab switching functionality
         $('.tab-button').on('click', function(e) {
@@ -935,6 +1196,15 @@ function wptypescript_analytics_code() {
 add_action('wp_head', 'wptypescript_analytics_code');
 
 /**
+ * Sanitize a CSS custom property value safely for inline style output.
+ */
+function wptypescript_sanitize_css_value($value) {
+    $value = wp_strip_all_tags($value);
+    $value = str_replace(array("\r", "\n"), '', $value);
+    return trim($value);
+}
+
+/**
  * Output global layout styles
  */
 function wptypescript_layout_styles() {
@@ -947,17 +1217,84 @@ function wptypescript_layout_styles() {
     $secondary_color = get_option('wptypescript_secondary_color', '#23282d');
     $text_color = get_option('wptypescript_text_color', '#333333');
     $background_color = get_option('wptypescript_background_color', '#ffffff');
-    $heading_font = get_option('wptypescript_heading_font', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif');
-    $body_font = get_option('wptypescript_body_font', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif');
+    $background_image = get_option('wptypescript_background_image', '');
+    $background_image_size = get_option('wptypescript_background_image_size', 'cover');
+    $background_overlay_color = get_option('wptypescript_background_overlay_color', '');
+    $gradient_top_color = get_option('wptypescript_gradient_top_color', '');
+    $gradient_center_color = get_option('wptypescript_gradient_center_color', '');
+    $gradient_bottom_color = get_option('wptypescript_gradient_bottom_color', '');
+    $link_color = get_option('wptypescript_link_color', '#0073aa');
+    $link_hover_color = get_option('wptypescript_link_hover_color', '#005b8f');
+    $link_style = get_option('wptypescript_link_style', 'underline');
     
     // Typography
+    $default_body_font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif';
+    $default_heading_font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif';
     $h1_size = get_option('wptypescript_h1_size', '48');
     $h2_size = get_option('wptypescript_h2_size', '36');
     $h3_size = get_option('wptypescript_h3_size', '28');
+    $h4_size = get_option('wptypescript_h4_size', '24');
+    $h5_size = get_option('wptypescript_h5_size', '20');
+    $h6_size = get_option('wptypescript_h6_size', '18');
     $body_size = get_option('wptypescript_body_size', '16');
     $line_height = get_option('wptypescript_line_height', '1.6');
-    $heading_font_weight = get_option('wptypescript_heading_font_weight', '700');
-    $heading_font_style = get_option('wptypescript_heading_font_style', 'normal');
+
+    // Per-heading fonts/weights/styles with fallbacks
+    $h1_font = get_option('wptypescript_h1_font_family', '');
+    $h2_font = get_option('wptypescript_h2_font_family', '');
+    $h3_font = get_option('wptypescript_h3_font_family', '');
+    $h4_font = get_option('wptypescript_h4_font_family', '');
+    $h5_font = get_option('wptypescript_h5_font_family', '');
+    $h6_font = get_option('wptypescript_h6_font_family', '');
+    $p_font  = get_option('wptypescript_p_font_family', '');
+
+    $h1_font = trim($h1_font) !== '' ? $h1_font : $default_heading_font;
+    $h2_font = trim($h2_font) !== '' ? $h2_font : $default_heading_font;
+    $h3_font = trim($h3_font) !== '' ? $h3_font : $default_heading_font;
+    $h4_font = trim($h4_font) !== '' ? $h4_font : $default_heading_font;
+    $h5_font = trim($h5_font) !== '' ? $h5_font : $default_heading_font;
+    $h6_font = trim($h6_font) !== '' ? $h6_font : $default_heading_font;
+    $p_font  = trim($p_font) !== '' ? $p_font : $default_body_font;
+
+    $h1_color = get_option('wptypescript_h1_color', '');
+    $h2_color = get_option('wptypescript_h2_color', '');
+    $h3_color = get_option('wptypescript_h3_color', '');
+    $h4_color = get_option('wptypescript_h4_color', '');
+    $h5_color = get_option('wptypescript_h5_color', '');
+    $h6_color = get_option('wptypescript_h6_color', '');
+    $p_color  = get_option('wptypescript_p_color', '');
+    $p_color  = trim($p_color) !== '' ? $p_color : $text_color;
+
+    $h1_letter_spacing = get_option('wptypescript_h1_letter_spacing', '');
+    $h2_letter_spacing = get_option('wptypescript_h2_letter_spacing', '');
+    $h3_letter_spacing = get_option('wptypescript_h3_letter_spacing', '');
+    $h4_letter_spacing = get_option('wptypescript_h4_letter_spacing', '');
+    $h5_letter_spacing = get_option('wptypescript_h5_letter_spacing', '');
+    $h6_letter_spacing = get_option('wptypescript_h6_letter_spacing', '');
+    $p_letter_spacing  = get_option('wptypescript_p_letter_spacing', '');
+
+    $h1_weight = get_option('wptypescript_h1_font_weight', 'inherit');
+    $h2_weight = get_option('wptypescript_h2_font_weight', 'inherit');
+    $h3_weight = get_option('wptypescript_h3_font_weight', 'inherit');
+    $h4_weight = get_option('wptypescript_h4_font_weight', 'inherit');
+    $h5_weight = get_option('wptypescript_h5_font_weight', 'inherit');
+    $p_weight  = get_option('wptypescript_p_font_weight', 'inherit');
+
+    $h1_style = get_option('wptypescript_h1_font_style', 'normal');
+    $h2_style = get_option('wptypescript_h2_font_style', 'normal');
+    $h3_style = get_option('wptypescript_h3_font_style', 'normal');
+    $h4_style = get_option('wptypescript_h4_font_style', 'normal');
+    $h5_style = get_option('wptypescript_h5_font_style', 'normal');
+    $h6_style = get_option('wptypescript_h6_font_style', 'normal');
+    $p_style  = get_option('wptypescript_p_font_style', 'normal');
+    
+    $h1_line_height = get_option('wptypescript_h1_line_height', '1.2');
+    $h2_line_height = get_option('wptypescript_h2_line_height', '1.25');
+    $h3_line_height = get_option('wptypescript_h3_line_height', '1.3');
+    $h4_line_height = get_option('wptypescript_h4_line_height', '1.35');
+    $h5_line_height = get_option('wptypescript_h5_line_height', '1.4');
+    $h6_line_height = get_option('wptypescript_h6_line_height', '1.4');
+    $p_line_height  = get_option('wptypescript_p_line_height', '1.6');
     
     // Header
     $header_layout = get_option('wptypescript_header_layout', 'standard');
@@ -975,57 +1312,90 @@ function wptypescript_layout_styles() {
             --secondary-color: <?php echo esc_attr($secondary_color); ?>;
             --text-color: <?php echo esc_attr($text_color); ?>;
             --background-color: <?php echo esc_attr($background_color); ?>;
-            --heading-font: <?php echo esc_attr($heading_font); ?>;
-            --body-font: <?php echo esc_attr($body_font); ?>;
+            --link-color: <?php echo esc_attr($link_color); ?>;
+            --link-hover-color: <?php echo esc_attr($link_hover_color); ?>;
+            --link-style: <?php echo esc_attr($link_style); ?>;
+            --background-image: <?php echo $background_image ? 'url(' . esc_url($background_image) . ')' : 'none'; ?>;
+            --background-image-size: <?php echo esc_attr($background_image_size); ?>;
+            --background-overlay-color: <?php echo esc_attr($background_overlay_color ? $background_overlay_color : 'transparent'); ?>;
+            --gradient-top-color: <?php echo esc_attr($gradient_top_color); ?>;
+            --gradient-center-color: <?php echo esc_attr($gradient_center_color); ?>;
+            --gradient-bottom-color: <?php echo esc_attr($gradient_bottom_color); ?>;
+            --body-font: <?php echo wptypescript_sanitize_css_value($p_font); ?>;
+            --heading-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
+            --h1-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
+            --h2-font: <?php echo wptypescript_sanitize_css_value($h2_font); ?>;
+            --h3-font: <?php echo wptypescript_sanitize_css_value($h3_font); ?>;
+            --h4-font: <?php echo wptypescript_sanitize_css_value($h4_font); ?>;
+            --h5-font: <?php echo wptypescript_sanitize_css_value($h5_font); ?>;
+            --h6-font: <?php echo wptypescript_sanitize_css_value($h6_font); ?>;
+            --p-font: <?php echo wptypescript_sanitize_css_value($p_font); ?>;
+            --h1-color: <?php echo esc_attr($h1_color); ?>;
+            --h2-color: <?php echo esc_attr($h2_color); ?>;
+            --h3-color: <?php echo esc_attr($h3_color); ?>;
+            --h4-color: <?php echo esc_attr($h4_color); ?>;
+            --h5-color: <?php echo esc_attr($h5_color); ?>;
+            --h6-color: <?php echo esc_attr($h6_color); ?>;
+            --p-color: <?php echo esc_attr($p_color); ?>;
+            --h1-letter-spacing: <?php echo trim($h1_letter_spacing) !== '' ? esc_attr($h1_letter_spacing) . 'px' : 'normal'; ?>;
+            --h2-letter-spacing: <?php echo trim($h2_letter_spacing) !== '' ? esc_attr($h2_letter_spacing) . 'px' : 'normal'; ?>;
+            --h3-letter-spacing: <?php echo trim($h3_letter_spacing) !== '' ? esc_attr($h3_letter_spacing) . 'px' : 'normal'; ?>;
+            --h4-letter-spacing: <?php echo trim($h4_letter_spacing) !== '' ? esc_attr($h4_letter_spacing) . 'px' : 'normal'; ?>;
+            --h5-letter-spacing: <?php echo trim($h5_letter_spacing) !== '' ? esc_attr($h5_letter_spacing) . 'px' : 'normal'; ?>;
+            --h6-letter-spacing: <?php echo trim($h6_letter_spacing) !== '' ? esc_attr($h6_letter_spacing) . 'px' : 'normal'; ?>;
+            --p-letter-spacing: <?php echo trim($p_letter_spacing) !== '' ? esc_attr($p_letter_spacing) . 'px' : 'normal'; ?>;
             --h1-size: <?php echo esc_attr($h1_size); ?>px;
             --h2-size: <?php echo esc_attr($h2_size); ?>px;
             --h3-size: <?php echo esc_attr($h3_size); ?>px;
+            --h4-size: <?php echo esc_attr($h4_size); ?>px;
+            --h5-size: <?php echo esc_attr($h5_size); ?>px;
+            --h6-size: <?php echo esc_attr(get_option('wptypescript_h6_size', '16')); ?>px;
+            --p-size: <?php echo esc_attr(get_option('wptypescript_p_size', '16')); ?>px;
             --body-size: <?php echo esc_attr($body_size); ?>px;
             --line-height: <?php echo esc_attr($line_height); ?>;
+            --h1-line-height: <?php echo esc_attr($h1_line_height); ?>;
+            --h2-line-height: <?php echo esc_attr($h2_line_height); ?>;
+            --h3-line-height: <?php echo esc_attr($h3_line_height); ?>;
+            --h4-line-height: <?php echo esc_attr($h4_line_height); ?>;
+            --h5-line-height: <?php echo esc_attr($h5_line_height); ?>;
+            --h6-line-height: <?php echo esc_attr($h6_line_height); ?>;
+            --p-line-height: <?php echo esc_attr($p_line_height); ?>;
             --header-height: <?php echo esc_attr($header_height); ?>px;
             --sidebar-width: <?php echo esc_attr($sidebar_width); ?>px;
-            --heading-font-weight: <?php echo esc_attr($heading_font_weight); ?>;
-            --heading-font-style: <?php echo esc_attr($heading_font_style); ?>;
+            --h1-weight: <?php echo esc_attr($h1_weight); ?>;
+            --h2-weight: <?php echo esc_attr($h2_weight); ?>;
+            --h3-weight: <?php echo esc_attr($h3_weight); ?>;
+            --h4-weight: <?php echo esc_attr($h4_weight); ?>;
+            --h5-weight: <?php echo esc_attr($h5_weight); ?>;
+            --p-weight: <?php echo esc_attr($p_weight); ?>;
+            --h1-style: <?php echo esc_attr($h1_style); ?>;
+            --h2-style: <?php echo esc_attr($h2_style); ?>;
+            --h3-style: <?php echo esc_attr($h3_style); ?>;
+            --h4-style: <?php echo esc_attr($h4_style); ?>;
+            --h5-style: <?php echo esc_attr($h5_style); ?>;
+            --p-style: <?php echo esc_attr($p_style); ?>;
         }
         
-        .container {
-            max-width: var(--container-width);
-        }
-        
-        body {
-            color: var(--text-color);
-            background-color: var(--background-color);
-            font-family: var(--body-font);
-            font-size: var(--body-size);
-            line-height: var(--line-height);
-        }
-        
-        h1, h2, h3, h4, h5, h6 {
-            font-family: var(--heading-font);
-        }
-        
-        h1 {
-            font-size: var(--h1-size);
-        }
-        
-        h2 {
-            font-size: var(--h2-size);
-        }
-        
-        h3 {
-            font-size: var(--h3-size);
-        }
-        
-        .site-header {
-            background-color: var(--primary-color);
-            min-height: var(--header-height);
-        }
-        
+        </style>
+    <?php
+}
+add_action('wp_head', 'wptypescript_layout_styles');
+
+/**
+ * Output small inline stylesheet for conditional layout selectors
+ */
+function wptypescript_layout_conditionals() {
+    $header_layout = get_option('wptypescript_header_layout', 'standard');
+    $default_layout = get_option('wptypescript_default_layout', 'full-width');
+    $layout_type = get_option('wptypescript_layout_type', 'full-width');
+    $header_style = get_option('wptypescript_header_style', 'standard');
+    ?>
+    <style id="wptypescript-layout-conditionals">
         <?php if ($header_layout === 'centered') : ?>
         .site-header .container {
             text-align: center;
         }
-        
+
         .site-header .primary-navigation {
             justify-content: center;
         }
@@ -1035,16 +1405,12 @@ function wptypescript_layout_styles() {
             align-items: center;
             justify-content: space-between;
         }
-        
+
         .site-header .site-title {
             margin: 0;
         }
         <?php endif; ?>
-        
-        .site-footer {
-            background-color: var(--secondary-color);
-        }
-        
+
         <?php if ($default_layout === 'left-sidebar') : ?>
         .site-content {
             display: grid;
@@ -1058,12 +1424,12 @@ function wptypescript_layout_styles() {
             gap: 2rem;
         }
         <?php endif; ?>
-        
+
         <?php if ($layout_type === 'boxed') : ?>
         body {
             background-color: #f0f0f0;
         }
-        
+
         .site-wrapper {
             max-width: var(--container-width);
             margin: 0 auto;
@@ -1076,7 +1442,7 @@ function wptypescript_layout_styles() {
             padding: 0;
         }
         <?php endif; ?>
-        
+
         <?php if ($header_style === 'sticky') : ?>
         .site-header {
             position: sticky;
@@ -1096,4 +1462,140 @@ function wptypescript_layout_styles() {
     </style>
     <?php
 }
-add_action('wp_head', 'wptypescript_layout_styles');
+add_action('wp_head', 'wptypescript_layout_conditionals');
+
+/**
+ * Enqueue Google Fonts for any selected font options
+ */
+function wptypescript_enqueue_google_fonts() {
+    $known_google_fonts = array(
+        'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Poppins', 'Oswald', 'Raleway', 'Merriweather', 'Source Sans Pro', 'Nunito'
+    );
+
+    $font_weights = array();
+    $family_data = array(
+        array(
+            'font' => get_option('wptypescript_h1_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h1_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h2_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h2_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h3_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h3_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h2_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h2_font_weight', get_option('wptypescript_body_font_weight', 'inherit'))),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h3_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h3_font_weight', get_option('wptypescript_body_font_weight', 'inherit'))),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h4_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h4_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_h5_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_h5_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_p_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_p_font_weight', 'inherit')),
+            'google' => true,
+        ),
+    );
+
+    foreach ($family_data as $data) {
+        $name = wptypescript_extract_local_font_family($data['font']);
+        if (empty($name)) {
+            continue;
+        }
+
+        if ($data['google'] && !wptypescript_is_known_google_font($name, $known_google_fonts)) {
+            continue;
+        }
+
+        if (!isset($font_weights[$name])) {
+            $font_weights[$name] = array();
+        }
+
+        $font_weights[$name] = array_merge($font_weights[$name], $data['weights']);
+    }
+
+    $custom = get_option('wptypescript_custom_google_fonts', '');
+    if (!empty($custom)) {
+        $parts = array_map('trim', explode(',', $custom));
+        foreach ($parts as $part) {
+            $name = trim($part, "'\" ");
+            if (empty($name)) {
+                continue;
+            }
+            if (!isset($font_weights[$name])) {
+                $font_weights[$name] = array();
+            }
+            $font_weights[$name] = array_merge($font_weights[$name], array('400'));
+        }
+    }
+
+    if (empty($font_weights)) {
+        return;
+    }
+
+    $families = array();
+    foreach ($font_weights as $font => $weights) {
+        $weights = array_filter(array_unique($weights), 'is_numeric');
+        if (empty($weights)) {
+            $weights = array('400');
+        }
+
+        sort($weights, SORT_NUMERIC);
+        $family_name = str_replace(' ', '+', $font);
+        $families[] = $family_name . ':wght@' . implode(';', $weights);
+    }
+
+    $href = 'https://fonts.googleapis.com/css2?family=' . implode('&family=', $families) . '&display=swap';
+    wp_enqueue_style('wptypescript-google-fonts', esc_url_raw($href), array(), null);
+}
+
+function wptypescript_parse_font_weight($weight) {
+    if (empty($weight) || $weight === 'inherit') {
+        return array();
+    }
+
+    return is_numeric($weight) ? array($weight) : array();
+}
+
+function wptypescript_extract_local_font_family($font_family) {
+    if (empty($font_family)) {
+        return '';
+    }
+
+    $font_family = trim($font_family);
+    if (strpos($font_family, ',') !== false) {
+        $font_family = trim(substr($font_family, 0, strpos($font_family, ',')));
+    }
+
+    return trim($font_family, "'\" ");
+}
+
+function wptypescript_is_known_google_font($font_name, $known_fonts) {
+    foreach ($known_fonts as $known) {
+        if (strcasecmp($font_name, $known) === 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+add_action('wp_enqueue_scripts', 'wptypescript_enqueue_google_fonts');
