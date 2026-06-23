@@ -264,6 +264,12 @@ function wptypescript_register_settings() {
         'default' => '',
     ));
 
+    register_setting('wptypescript_options', 'wptypescript_gradient_opacity', array(
+        'type' => 'string',
+        'sanitize_callback' => 'wptypescript_sanitize_opacity',
+        'default' => '0',
+    ));
+
     register_setting('wptypescript_options', 'wptypescript_link_color', array(
         'type' => 'string',
         'sanitize_callback' => 'sanitize_hex_color',
@@ -722,6 +728,18 @@ function wptypescript_options_page() {
                                                style="width: 100%; height: 40px; cursor: pointer;">
                                     </div>
                                 </div>
+                                <div style="margin-top: 12px; max-width: 280px;">
+                                    <label for="wptypescript_gradient_opacity" style="display: block; margin-bottom: 4px; font-weight: 500;"><?php _e('Gradient Opacity', 'wptypescript'); ?></label>
+                                    <input type="number"
+                                           id="wptypescript_gradient_opacity"
+                                           name="wptypescript_gradient_opacity"
+                                           value="<?php echo esc_attr(get_option('wptypescript_gradient_opacity', '0')); ?>"
+                                           class="small-text"
+                                           min="0"
+                                           max="1"
+                                           step="0.05">
+                                    <p class="description"><?php _e('Opacity of the gradient overlay (0 = transparent, 1 = fully opaque).', 'wptypescript'); ?></p>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -737,6 +755,7 @@ function wptypescript_options_page() {
                                 $grad_top = esc_attr(get_option('wptypescript_gradient_top_color', ''));
                                 $grad_center = esc_attr(get_option('wptypescript_gradient_center_color', ''));
                                 $grad_bottom = esc_attr(get_option('wptypescript_gradient_bottom_color', ''));
+                                $grad_opacity = esc_attr(get_option('wptypescript_gradient_opacity', '0'));
                                 
                                 $gradient_css = '';
                                 if ($grad_top || $grad_center || $grad_bottom) {
@@ -757,7 +776,7 @@ function wptypescript_options_page() {
                                         <div style="position: absolute; inset: 0; background-color: <?php echo $bg_overlay; ?>; opacity: 0.7;"></div>
                                     <?php endif; ?>
                                     <?php if ($gradient_css) : ?>
-                                        <div style="position: absolute; inset: 0; background: <?php echo $gradient_css; ?>; opacity: 0.8;"></div>
+                                        <div class="wptypescript-gradient-preview" style="position: absolute; inset: 0; background: <?php echo $gradient_css; ?>; opacity: <?php echo $grad_opacity; ?>;"></div>
                                     <?php endif; ?>
                                 </div>
                                 <p class="description" style="margin-top: 8px;"><?php _e('Live preview of your selected background image, overlay, and gradient.', 'wptypescript'); ?></p>
@@ -1177,6 +1196,10 @@ function wptypescript_options_page() {
             var tabId = $(this).data('tab');
             $('#' + tabId).addClass('active');
         });
+
+        $('#wptypescript_gradient_opacity').on('input change', function() {
+            $('.wptypescript-gradient-preview').css('opacity', $(this).val());
+        });
     });
     </script>
     <?php
@@ -1205,6 +1228,21 @@ function wptypescript_sanitize_css_value($value) {
 }
 
 /**
+ * Sanitize a CSS opacity value (0–1).
+ */
+function wptypescript_sanitize_opacity($value) {
+    $value = floatval($value);
+
+    if ($value < 0) {
+        $value = 0;
+    } elseif ($value > 1) {
+        $value = 1;
+    }
+
+    return (string) $value;
+}
+
+/**
  * Output global layout styles
  */
 function wptypescript_layout_styles() {
@@ -1223,6 +1261,7 @@ function wptypescript_layout_styles() {
     $gradient_top_color = get_option('wptypescript_gradient_top_color', '');
     $gradient_center_color = get_option('wptypescript_gradient_center_color', '');
     $gradient_bottom_color = get_option('wptypescript_gradient_bottom_color', '');
+    $gradient_opacity = get_option('wptypescript_gradient_opacity', '0');
     $link_color = get_option('wptypescript_link_color', '#0073aa');
     $link_hover_color = get_option('wptypescript_link_hover_color', '#005b8f');
     $link_style = get_option('wptypescript_link_style', 'underline');
@@ -1318,9 +1357,10 @@ function wptypescript_layout_styles() {
             --background-image: <?php echo $background_image ? 'url(' . esc_url($background_image) . ')' : 'none'; ?>;
             --background-image-size: <?php echo esc_attr($background_image_size); ?>;
             --background-overlay-color: <?php echo esc_attr($background_overlay_color ? $background_overlay_color : 'transparent'); ?>;
-            --gradient-top-color: <?php echo esc_attr($gradient_top_color); ?>;
-            --gradient-center-color: <?php echo esc_attr($gradient_center_color); ?>;
-            --gradient-bottom-color: <?php echo esc_attr($gradient_bottom_color); ?>;
+            --gradient-top-color: <?php echo esc_attr($gradient_top_color ? $gradient_top_color : 'transparent'); ?>;
+            --gradient-center-color: <?php echo esc_attr($gradient_center_color ? $gradient_center_color : 'transparent'); ?>;
+            --gradient-bottom-color: <?php echo esc_attr($gradient_bottom_color ? $gradient_bottom_color : 'transparent'); ?>;
+            --gradient-opacity: <?php echo esc_attr($gradient_opacity); ?>;
             --body-font: <?php echo wptypescript_sanitize_css_value($p_font); ?>;
             --heading-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
             --h1-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
