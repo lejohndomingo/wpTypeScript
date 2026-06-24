@@ -1,0 +1,38 @@
+.wptypescript-testimonial {
+  padding: 2rem;
+  border-radius: 8px;
+
+  .wptypescript-testimonial-avatar {
+    margin-bottom: 1rem;
+
+    img {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      object-fit: cover;
+      display: inline-block;
+    }
+  }
+
+  blockquote {
+    margin: 0 0 1rem;
+    font-size: 1.25rem;
+    font-style: italic;
+    line-height: 1.6;
+    border: none;
+    padding: 0;
+  }
+
+  cite {
+    display: block;
+    font-style: normal;
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .wptypescript-testimonial-role {
+    font-size: 0.875rem;
+    opacity: 0.75;
+  }
+}

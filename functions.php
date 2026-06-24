@@ -30,7 +30,7 @@ function wptypescript_enqueue_assets() {
         array('wptypescript-styles'),
         $theme_version
     );
-    
+
     // Enqueue compiled JavaScript
     wp_enqueue_script(
         'wptypescript-main',
@@ -52,19 +52,19 @@ add_action('wp_enqueue_scripts', 'wptypescript_enqueue_assets');
  * Enqueue admin scripts and styles
  */
 function wptypescript_admin_enqueue_assets($hook) {
-    if ('toplevel_page_wptypescript-options' !== $hook) {
-        return;
-    }
-    
     $theme_version = wp_get_theme()->get('Version');
     
-    // Enqueue Theme Options admin CSS
+    // Enqueue admin CSS on all admin pages
     wp_enqueue_style(
         'wptypescript-admin',
         get_template_directory_uri() . '/assets/css/admin.css',
         array(),
         $theme_version
     );
+
+    if ('toplevel_page_wptypescript-options' !== $hook) {
+        return;
+    }
     
     wp_enqueue_style('wp-color-picker');
     wp_enqueue_script('wp-color-picker', false, array('jquery'));
@@ -72,12 +72,28 @@ function wptypescript_admin_enqueue_assets($hook) {
     wp_enqueue_script(
         'wptypescript-admin-script',
         get_template_directory_uri() . '/assets/js/admin.js',
-        array('wp-color-picker'),
+        array('wp-color-picker', 'jquery'),
         $theme_version,
         true
     );
+
+    wp_localize_script('wptypescript-admin-script', 'wptypescriptAdminData', array(
+        'restUrl' => rest_url('wptypescript/v1'),
+        'restNonce' => wp_create_nonce('wp_rest'),
+    ));
 }
 add_action('admin_enqueue_scripts', 'wptypescript_admin_enqueue_assets');
+
+/**
+ * Add type="module" to Vite-built ES module scripts
+ */
+function wptypescript_script_module_type(string $tag, string $handle, string $src): string {
+    if (in_array($handle, ['wptypescript-main', 'wptypescript-admin-script'], true)) {
+        $tag = '<script type="module" src="' . esc_url($src) . '" id="' . $handle . '-js"></script>' . "\n";
+    }
+    return $tag;
+}
+add_filter('script_loader_tag', 'wptypescript_script_module_type', 10, 3);
 
 /**
  * Theme setup
@@ -127,6 +143,169 @@ function wptypescript_theme_setup() {
 add_action('after_setup_theme', 'wptypescript_theme_setup');
 
 /**
+ * Register custom block category
+ */
+add_filter('block_categories_all', function ($categories) {
+    $categories[] = array(
+        'slug'  => 'wptypescript',
+        'title' => __('Custom Blocks', 'wptypescript'),
+    );
+    return $categories;
+});
+
+/**
+ * Register Gutenberg blocks
+ */
+function wptypescript_register_blocks() {
+    $theme_dir = get_template_directory();
+    $blocks_dir = $theme_dir . '/blocks';
+
+    foreach (glob($blocks_dir . '/*', GLOB_ONLYDIR) as $block_dir) {
+        $block_json_path = $block_dir . '/block.json';
+        if (!file_exists($block_json_path)) continue;
+
+        $metadata = json_decode(file_get_contents($block_json_path), true);
+        if (!$metadata || empty($metadata['name'])) continue;
+
+        $block_name   = $metadata['name'];
+        $block_slug   = basename($block_dir);
+        $block_uri    = get_template_directory_uri() . '/blocks/' . $block_slug;
+        $handle_base  = str_replace('/', '-', $block_name);
+
+        $editor_script_handles = array();
+        $editor_style_handles  = array();
+        $style_handles         = array();
+
+        // Editor script
+        if (!empty($metadata['editorScript'])) {
+            $rel  = str_replace('file:', '', $metadata['editorScript']);
+            $path = $block_dir . '/' . $rel;
+            if (file_exists($path)) {
+                $handle = $handle_base . '-editor';
+                wp_register_script($handle, $block_uri . '/' . $rel,
+                    ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-i18n', 'wp-components'],
+                    filemtime($path), false);
+                $editor_script_handles[] = $handle;
+            }
+        }
+
+        // Editor style
+        if (!empty($metadata['editorStyle'])) {
+            $rel  = str_replace('file:', '', $metadata['editorStyle']);
+            $path = $block_dir . '/' . $rel;
+            if (file_exists($path)) {
+                $handle = $handle_base . '-editor-style';
+                wp_register_style($handle, $block_uri . '/' . $rel, [], filemtime($path));
+                $editor_style_handles[] = $handle;
+            }
+        }
+
+        // Front-end style
+        if (!empty($metadata['style'])) {
+            $rel  = str_replace('file:', '', $metadata['style']);
+            $path = $block_dir . '/' . $rel;
+            if (file_exists($path)) {
+                $handle = $handle_base . '-front-style';
+                wp_register_style($handle, $block_uri . '/' . $rel, [], filemtime($path));
+                $style_handles[] = $handle;
+            }
+        }
+
+        $args = array(
+            'title'                   => $metadata['title'] ?? '',
+            'description'             => $metadata['description'] ?? '',
+            'category'                => $metadata['category'] ?? 'wptypescript',
+            'icon'                    => $metadata['icon'] ?? '',
+            'keywords'                => $metadata['keywords'] ?? array(),
+            'textdomain'              => $metadata['textdomain'] ?? 'wptypescript',
+            'attributes'              => $metadata['attributes'] ?? array(),
+            'supports'                => $metadata['supports'] ?? array(),
+            'editor_script_handles'   => $editor_script_handles,
+            'editor_style_handles'    => $editor_style_handles,
+            'style_handles'           => $style_handles,
+        );
+
+        register_block_type($block_name, $args);
+    }
+}
+add_action('init', 'wptypescript_register_blocks');
+
+/**
+ * Capture AND clear ALL inline styles right before they are printed.
+ * Hooks at both wp_print_styles (head) and wp_print_footer_scripts (footer)
+ * at priority 0 to catch styles added at any point during the request.
+ * Captured CSS is cached in an option and served from the dynamic endpoint,
+ * so no <style id="...-inline-css"> tags appear in the HTML.
+ * Theme custom CSS vars and analytics (output directly via wp_head) are preserved.
+ */
+function wptypescript_capture_all_inline_css() {
+    $wp_styles = wp_styles();
+    $all = array();
+
+    foreach ($wp_styles->registered as $handle => $data) {
+        if (!empty($data->extra['after'])) {
+            $css = trim(implode("\n", $data->extra['after']));
+            if ($css !== '') {
+                $all[] = "/* {$handle}-inline-css */\n" . $css;
+            }
+            $wp_styles->registered[$handle]->extra['after'] = array();
+        }
+    }
+
+    if (empty($all)) {
+        return;
+    }
+
+    $joined = implode("\n\n", $all);
+    $prev = get_option('wptypescript_captured_inline_css', '');
+    if ($joined !== $prev) {
+        update_option('wptypescript_captured_inline_css', $joined);
+    }
+}
+add_action('wp_print_styles', 'wptypescript_capture_all_inline_css', 0);
+add_action('wp_print_footer_scripts', 'wptypescript_capture_all_inline_css', 0);
+
+/**
+ * Beautify HTML output with proper indentation.
+ * Skips the dynamic CSS endpoint and admin pages.
+ */
+function wptypescript_beautify_html() {
+    if (isset($_GET['wptypescript_dynamic_css']) || is_admin()) {
+        return;
+    }
+    ob_start('wptypescript_format_html');
+}
+add_action('template_redirect', 'wptypescript_beautify_html', 0);
+
+function wptypescript_format_html($buffer) {
+    $lines = explode("\n", $buffer);
+    $output = '';
+    $depth = 0;
+    $block_tags = 'html|head|body|div|section|article|nav|header|footer|main|aside|ul|ol|li|table|thead|tbody|tfoot|tr|th|td|form|fieldset|select|option|optgroup|figure|figcaption|details|summary|dialog|blockquote|pre';
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            $output .= "\n";
+            continue;
+        }
+
+        if (preg_match('/^<\//', $trimmed)) {
+            $depth = max(0, $depth - 1);
+        } elseif (preg_match('/^<!--/', $trimmed)) {
+        } elseif (preg_match('/^<(?:' . $block_tags . ')/i', $trimmed) && !preg_match('/\/>$/', $trimmed) && !preg_match('/^<[^>]*\/>/', $trimmed)) {
+            $output .= str_repeat('  ', $depth) . $trimmed . "\n";
+            $depth++;
+            continue;
+        }
+
+        $output .= str_repeat('  ', $depth) . $trimmed . "\n";
+    }
+
+    return $output;
+}
+
+/**
  * Enqueue development assets (only in development)
  */
 function wptypescript_dev_assets() {
@@ -172,6 +351,34 @@ function wptypescript_register_settings() {
         'default' => '',
     ));
     
+    $scripts_settings = array('header_css', 'header_js', 'body_css', 'body_js', 'footer_css', 'footer_js');
+    foreach ($scripts_settings as $key) {
+        register_setting('wptypescript_options', "wptypescript_{$key}", array(
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_textarea_field',
+            'default' => '',
+        ));
+    }
+
+    // Top Header Settings
+    register_setting('wptypescript_options', 'wptypescript_enable_top_header', array(
+        'type' => 'boolean',
+        'sanitize_callback' => 'rest_sanitize_boolean',
+        'default' => false,
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_top_header_hide_scroll', array(
+        'type' => 'boolean',
+        'sanitize_callback' => 'rest_sanitize_boolean',
+        'default' => false,
+    ));
+
+    register_setting('wptypescript_options', 'wptypescript_top_header_content', array(
+        'type' => 'string',
+        'sanitize_callback' => 'wp_kses_post',
+        'default' => '',
+    ));
+
     // Global Layout Settings
     register_setting('wptypescript_options', 'wptypescript_container_width', array(
         'type' => 'string',
@@ -428,6 +635,73 @@ function wptypescript_register_settings() {
         ));
     }
     
+    // Primary Button Typography Settings
+    register_setting('wptypescript_options', 'wptypescript_primary_button_font_family', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_font_weight', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'inherit',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_font_style', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'normal',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_letter_spacing', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_link_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_border_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_border_radius', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => '0',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_font_icon', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'none',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_type', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'filled',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_background_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_hover_link_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_hover_type', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'none',
+    ));
+    register_setting('wptypescript_options', 'wptypescript_primary_button_hover_background_color', array(
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_hex_color',
+        'default' => '',
+    ));
+    
     // Sidebar Layout
     register_setting('wptypescript_options', 'wptypescript_default_layout', array(
         'type' => 'string',
@@ -444,6 +718,83 @@ function wptypescript_register_settings() {
 add_action('admin_init', 'wptypescript_register_settings');
 
 /**
+ * Register REST API endpoints for theme options
+ */
+function wptypescript_register_rest_routes() {
+    register_rest_route('wptypescript/v1', '/save-option', array(
+        'methods' => 'POST',
+        'callback' => 'wptypescript_rest_save_option',
+        'permission_callback' => function () {
+            return current_user_can('manage_options');
+        },
+        'args' => array(
+            'option_name' => array(
+                'required' => true,
+                'sanitize_callback' => 'sanitize_key',
+            ),
+            'option_value' => array(
+                'required' => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ),
+        ),
+    ));
+
+    register_rest_route('wptypescript/v1', '/save-options', array(
+        'methods' => 'POST',
+        'callback' => 'wptypescript_rest_save_options',
+        'permission_callback' => function () {
+            return current_user_can('manage_options');
+        },
+        'args' => array(
+            'options' => array(
+                'required' => true,
+                'type' => 'object',
+            ),
+        ),
+    ));
+}
+
+function wptypescript_rest_save_option(WP_REST_Request $request) {
+    $option_name = $request->get_param('option_name');
+    $option_value = $request->get_param('option_value');
+
+    if (!wptypescript_is_valid_option($option_name)) {
+        return new WP_Error('invalid_option', __('Invalid option name.', 'wptypescript'), array('status' => 400));
+    }
+
+    update_option($option_name, wp_unslash($option_value));
+
+    return new WP_REST_Response(array(
+        'success' => true,
+        'message' => sprintf(__('Option "%s" saved.', 'wptypescript'), $option_name),
+    ), 200);
+}
+
+function wptypescript_rest_save_options(WP_REST_Request $request) {
+    $options = $request->get_param('options');
+
+    foreach ($options as $name => $value) {
+        if (!wptypescript_is_valid_option($name)) continue;
+        update_option($name, wp_unslash(sanitize_text_field($value)));
+    }
+
+    return new WP_REST_Response(array(
+        'success' => true,
+        'message' => __('Options saved.', 'wptypescript'),
+    ), 200);
+}
+
+function wptypescript_is_valid_option(string $name): bool {
+    if (strpos($name, 'wptypescript_') !== 0) return false;
+    $registered = array_keys(wp_load_alloptions());
+    return in_array($name, $registered, true) || in_array($name, array(
+        'wptypescript_enable_analytics',
+        'wptypescript_analytics_code',
+    ), true);
+}
+add_action('rest_api_init', 'wptypescript_register_rest_routes');
+
+/**
  * Theme options page callback
  */
 function wptypescript_options_page() {
@@ -454,14 +805,16 @@ function wptypescript_options_page() {
         <!-- Tab Navigation -->
         <div class="wptypescript-tabs">
             <button class="tab-button active" data-tab="analytics"><?php _e('Analytics', 'wptypescript'); ?></button>
+            <button class="tab-button" data-tab="scripts"><?php _e('Scripts', 'wptypescript'); ?></button>
             <button class="tab-button" data-tab="global-layout"><?php _e('Global Layout', 'wptypescript'); ?></button>
             <button class="tab-button" data-tab="colors-fonts"><?php _e('Colors', 'wptypescript'); ?></button>
             <button class="tab-button" data-tab="header-builder"><?php _e('Header Builder', 'wptypescript'); ?></button>
             <button class="tab-button" data-tab="typography"><?php _e('Typography', 'wptypescript'); ?></button>
             <button class="tab-button" data-tab="sidebar-layout"><?php _e('Sidebar Layout', 'wptypescript'); ?></button>
+            <button class="tab-button" data-tab="top-header"><?php _e('Top Header', 'wptypescript'); ?></button>
         </div>
         
-        <form action="options.php" method="post">
+        <form id="wptypescript-options-form" action="options.php" method="post">
             <?php
             settings_fields('wptypescript_options');
             do_settings_sections('wptypescript_options');
@@ -501,7 +854,99 @@ function wptypescript_options_page() {
                     </table>
                 </div>
                 </div>
-                
+
+                <!-- Scripts Settings (Header / Body / Footer) -->
+                <div class="tab-content" id="scripts">
+                <div class="card">
+                    <h2><?php _e('Scripts', 'wptypescript'); ?></h2>
+                    <p class="description"><?php _e('Add custom CSS and JavaScript to different sections of your site. CSS is wrapped in &lt;style&gt; tags, JavaScript in &lt;script&gt; tags.', 'wptypescript'); ?></p>
+                    
+                    <h3 style="margin-top:24px"><?php _e('Header (&lt;head&gt;)', 'wptypescript'); ?></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_header_css"><?php _e('CSS', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_header_css" 
+                                          name="wptypescript_header_css" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_header_css', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom CSS added to &lt;head&gt;. Do not include &lt;style&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_header_js"><?php _e('JavaScript', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_header_js" 
+                                          name="wptypescript_header_js" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_header_js', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom JavaScript added to &lt;head&gt;. Do not include &lt;script&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3 style="margin-top:24px"><?php _e('Body (after &lt;body&gt;)', 'wptypescript'); ?></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_body_css"><?php _e('CSS', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_body_css" 
+                                          name="wptypescript_body_css" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_body_css', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom CSS added after &lt;body&gt;. Do not include &lt;style&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_body_js"><?php _e('JavaScript', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_body_js" 
+                                          name="wptypescript_body_js" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_body_js', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom JavaScript added after &lt;body&gt;. Do not include &lt;script&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3 style="margin-top:24px"><?php _e('Footer (before &lt;/body&gt;)', 'wptypescript'); ?></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_footer_css"><?php _e('CSS', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_footer_css" 
+                                          name="wptypescript_footer_css" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_footer_css', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom CSS added before &lt;/body&gt;. Do not include &lt;style&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_footer_js"><?php _e('JavaScript', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_footer_js" 
+                                          name="wptypescript_footer_js" 
+                                          rows="5" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_footer_js', '')); ?></textarea>
+                                <p class="description"><?php _e('Custom JavaScript added before &lt;/body&gt;. Do not include &lt;script&gt; tags.', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                </div>
+
                 <!-- Global Layout Settings -->
                 <div class="tab-content" id="global-layout">
                 <div class="card">
@@ -1064,6 +1509,137 @@ function wptypescript_options_page() {
                         </tr>
                         <?php endforeach; ?>
                         
+                        <!-- Primary Button Typography -->
+                        <tr>
+                            <th scope="row">
+                                <label><?php _e('Primary Button', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <div class="wptypescript-heading-grid">
+                                    <div class="field family">
+                                        <label for="wptypescript_primary_button_font_family"><?php _e('Family', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_font_family" name="wptypescript_primary_button_font_family">
+                                            <?php foreach ($heading_font_options as $val => $label) : ?>
+                                                <option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('wptypescript_primary_button_font_family', ''), $val); ?>>
+                                                    <?php echo esc_html($label); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="field weight">
+                                        <label for="wptypescript_primary_button_font_weight"><?php _e('Weight', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_font_weight" name="wptypescript_primary_button_font_weight">
+                                            <?php foreach ($weights as $w) : ?>
+                                                <option value="<?php echo $w; ?>" <?php selected(get_option('wptypescript_primary_button_font_weight', 'inherit'), $w); ?>>
+                                                    <?php echo esc_html($w); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="field style">
+                                        <label for="wptypescript_primary_button_font_style"><?php _e('Style', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_font_style" name="wptypescript_primary_button_font_style">
+                                            <?php foreach ($styles as $s) : ?>
+                                                <option value="<?php echo esc_attr($s); ?>" <?php selected(get_option('wptypescript_primary_button_font_style', 'normal'), $s); ?>>
+                                                    <?php echo esc_html(ucfirst($s)); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="field letter-spacing">
+                                        <label for="wptypescript_primary_button_letter_spacing"><?php _e('Letter Spacing (px)', 'wptypescript'); ?></label>
+                                        <input type="number"
+                                               id="wptypescript_primary_button_letter_spacing"
+                                               name="wptypescript_primary_button_letter_spacing"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_letter_spacing', '')); ?>"
+                                               class="small-text"
+                                               min="-5" max="20" step="0.1" placeholder="0">
+                                    </div>
+                                    <div class="field color">
+                                        <label for="wptypescript_primary_button_link_color"><?php _e('Link Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_primary_button_link_color"
+                                               name="wptypescript_primary_button_link_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_link_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#ffffff">
+                                    </div>
+                                    <div class="field border-color">
+                                        <label for="wptypescript_primary_button_border_color"><?php _e('Border Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_primary_button_border_color"
+                                               name="wptypescript_primary_button_border_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_border_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#0073aa">
+                                    </div>
+                                    <div class="field border-radius">
+                                        <label for="wptypescript_primary_button_border_radius"><?php _e('Border Radius (px)', 'wptypescript'); ?></label>
+                                        <input type="number"
+                                               id="wptypescript_primary_button_border_radius"
+                                               name="wptypescript_primary_button_border_radius"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_border_radius', '0')); ?>"
+                                               class="small-text"
+                                               min="0" max="50" step="1" placeholder="0">
+                                    </div>
+                                    <div class="field background-color">
+                                        <label for="wptypescript_primary_button_background_color"><?php _e('Background Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_primary_button_background_color"
+                                               name="wptypescript_primary_button_background_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_background_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#0073aa">
+                                    </div>
+                                    <div class="field font-icon">
+                                        <label for="wptypescript_primary_button_font_icon"><?php _e('Font Icon', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_font_icon" name="wptypescript_primary_button_font_icon">
+                                            <option value="none" <?php selected(get_option('wptypescript_primary_button_font_icon', 'none'), 'none'); ?>><?php _e('None', 'wptypescript'); ?></option>
+                                            <option value="dashicons" <?php selected(get_option('wptypescript_primary_button_font_icon', 'none'), 'dashicons'); ?>><?php _e('Dashicons', 'wptypescript'); ?></option>
+                                            <option value="fontawesome" <?php selected(get_option('wptypescript_primary_button_font_icon', 'none'), 'fontawesome'); ?>><?php _e('Font Awesome', 'wptypescript'); ?></option>
+                                            <option value="material" <?php selected(get_option('wptypescript_primary_button_font_icon', 'none'), 'material'); ?>><?php _e('Material Icons', 'wptypescript'); ?></option>
+                                        </select>
+                                    </div>
+                                    <div class="field button-type">
+                                        <label for="wptypescript_primary_button_type"><?php _e('Button Type', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_type" name="wptypescript_primary_button_type">
+                                            <option value="filled" <?php selected(get_option('wptypescript_primary_button_type', 'filled'), 'filled'); ?>><?php _e('Filled', 'wptypescript'); ?></option>
+                                            <option value="outline" <?php selected(get_option('wptypescript_primary_button_type', 'filled'), 'outline'); ?>><?php _e('Outline', 'wptypescript'); ?></option>
+                                            <option value="text" <?php selected(get_option('wptypescript_primary_button_type', 'filled'), 'text'); ?>><?php _e('Text Only', 'wptypescript'); ?></option>
+                                            <option value="3d" <?php selected(get_option('wptypescript_primary_button_type', 'filled'), '3d'); ?>><?php _e('3D', 'wptypescript'); ?></option>
+                                        </select>
+                                    </div>
+                                    <div class="field hover-link-color">
+                                        <label for="wptypescript_primary_button_hover_link_color"><?php _e('Hover Link Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_primary_button_hover_link_color"
+                                               name="wptypescript_primary_button_hover_link_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_hover_link_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#ffffff">
+                                    </div>
+                                    <div class="field hover-type">
+                                        <label for="wptypescript_primary_button_hover_type"><?php _e('Hover Type', 'wptypescript'); ?></label>
+                                        <select id="wptypescript_primary_button_hover_type" name="wptypescript_primary_button_hover_type">
+                                            <option value="none" <?php selected(get_option('wptypescript_primary_button_hover_type', 'none'), 'none'); ?>><?php _e('None', 'wptypescript'); ?></option>
+                                            <option value="darken" <?php selected(get_option('wptypescript_primary_button_hover_type', 'none'), 'darken'); ?>><?php _e('Darken', 'wptypescript'); ?></option>
+                                            <option value="lighten" <?php selected(get_option('wptypescript_primary_button_hover_type', 'none'), 'lighten'); ?>><?php _e('Lighten', 'wptypescript'); ?></option>
+                                            <option value="underline" <?php selected(get_option('wptypescript_primary_button_hover_type', 'none'), 'underline'); ?>><?php _e('Underline', 'wptypescript'); ?></option>
+                                        </select>
+                                    </div>
+                                    <div class="field hover-background-color">
+                                        <label for="wptypescript_primary_button_hover_background_color"><?php _e('Hover Background Color', 'wptypescript'); ?></label>
+                                        <input type="text"
+                                               id="wptypescript_primary_button_hover_background_color"
+                                               name="wptypescript_primary_button_hover_background_color"
+                                               value="<?php echo esc_attr(get_option('wptypescript_primary_button_hover_background_color', '')); ?>"
+                                               class="regular-text color-picker"
+                                               placeholder="#005b8f">
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        
                         <tr>
                             <th scope="row">
                                 <label for="wptypescript_body_size"><?php _e('Body Font Size (px)', 'wptypescript'); ?></label>
@@ -1139,69 +1715,60 @@ function wptypescript_options_page() {
                     </table>
                 </div>
                 </div>
+
+                <!-- Top Header Settings -->
+                <div class="tab-content" id="top-header">
+                <div class="card">
+                    <h2><?php _e('Top Header', 'wptypescript'); ?></h2>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_enable_top_header"><?php _e('Enable Top Header', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <input type="checkbox" 
+                                       id="wptypescript_enable_top_header" 
+                                       name="wptypescript_enable_top_header" 
+                                       value="1" 
+                                       <?php checked(get_option('wptypescript_enable_top_header', false), true); ?>>
+                                <label for="wptypescript_enable_top_header"><?php _e('Show a top header bar above the main header', 'wptypescript'); ?></label>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_top_header_hide_scroll"><?php _e('Hide on Scroll', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <input type="checkbox" 
+                                       id="wptypescript_top_header_hide_scroll" 
+                                       name="wptypescript_top_header_hide_scroll" 
+                                       value="1" 
+                                       <?php checked(get_option('wptypescript_top_header_hide_scroll', false), true); ?>>
+                                <label for="wptypescript_top_header_hide_scroll"><?php _e('Hide the top header bar when scrolling down, show when scrolling up', 'wptypescript'); ?></label>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="wptypescript_top_header_content"><?php _e('Content', 'wptypescript'); ?></label>
+                            </th>
+                            <td>
+                                <textarea id="wptypescript_top_header_content" 
+                                          name="wptypescript_top_header_content" 
+                                          rows="4" 
+                                          class="large-text code"><?php echo esc_textarea(get_option('wptypescript_top_header_content', '')); ?></textarea>
+                                <p class="description"><?php _e('HTML content for the top header bar (text, links, phone, etc.)', 'wptypescript'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                </div>
             </div>
             
             <?php submit_button(__('Save Settings', 'wptypescript')); ?>
         </form>
     </div>
     
-    <script>
-    jQuery(document).ready(function($) {
-        $('.color-picker').wpColorPicker();
-        
-        // Background Image Media Uploader
-        var wptypescriptMediaFrame;
-        $('#wptypescript_background_image_button').on('click', function(e) {
-            e.preventDefault();
-            
-            if (wptypescriptMediaFrame) {
-                wptypescriptMediaFrame.open();
-                return;
-            }
-            
-            wptypescriptMediaFrame = wp.media({
-                title: wp.media.view.l10n.addMedia,
-                button: {
-                    text: wp.media.view.l10n.select
-                },
-                multiple: false,
-                library: {
-                    type: 'image'
-                }
-            });
-            
-            wptypescriptMediaFrame.on('select', function() {
-                var attachment = wptypescriptMediaFrame.state().get('selection').first().toJSON();
-                $('#wptypescript_background_image').val(attachment.url);
-                $('#wptypescript_background_image_id').val(attachment.id);
-            });
-            
-            wptypescriptMediaFrame.open();
-        });
-        
-        // Tab switching functionality
-        $('.tab-button').on('click', function(e) {
-            e.preventDefault();
-            
-            // Remove active class from all buttons
-            $('.tab-button').removeClass('active');
-            
-            // Add active class to clicked button
-            $(this).addClass('active');
-            
-            // Hide all tab content
-            $('.tab-content').removeClass('active');
-            
-            // Show selected tab content
-            var tabId = $(this).data('tab');
-            $('#' + tabId).addClass('active');
-        });
 
-        $('#wptypescript_gradient_opacity').on('input change', function() {
-            $('.wptypescript-gradient-preview').css('opacity', $(this).val());
-        });
-    });
-    </script>
     <?php
 }
 
@@ -1217,6 +1784,83 @@ function wptypescript_analytics_code() {
     }
 }
 add_action('wp_head', 'wptypescript_analytics_code');
+
+/**
+ * Output top header bar if enabled
+ */
+function wptypescript_top_header() {
+    if (!get_option('wptypescript_enable_top_header', false)) {
+        return;
+    }
+    $content = get_option('wptypescript_top_header_content', '');
+    $hide_scroll = get_option('wptypescript_top_header_hide_scroll', false) ? ' data-hide-scroll="true"' : '';
+    ?>
+    <div class="top-header-bar"<?php echo $hide_scroll; ?>>
+        <div class="container">
+            <?php if (!empty($content)) : ?>
+                <div class="top-header-content"><?php echo wp_kses_post($content); ?></div>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
+/**
+ * Output header CSS & JS in head (after analytics)
+ */
+function wptypescript_header_css() {
+    $val = get_option('wptypescript_header_css', '');
+    if (!empty($val)) {
+        echo '<style id="wptypescript-header-css">' . $val . '</style>';
+    }
+}
+add_action('wp_head', 'wptypescript_header_css', 11);
+
+function wptypescript_header_js() {
+    $val = get_option('wptypescript_header_js', '');
+    if (!empty($val)) {
+        echo '<script>' . $val . '</script>';
+    }
+}
+add_action('wp_head', 'wptypescript_header_js', 12);
+
+/**
+ * Output body CSS & JS after opening <body> tag
+ */
+function wptypescript_body_css() {
+    $val = get_option('wptypescript_body_css', '');
+    if (!empty($val)) {
+        echo '<style id="wptypescript-body-css">' . $val . '</style>';
+    }
+}
+add_action('wp_body_open', 'wptypescript_body_css', 9);
+
+function wptypescript_body_js() {
+    $val = get_option('wptypescript_body_js', '');
+    if (!empty($val)) {
+        echo '<script>' . $val . '</script>';
+    }
+}
+add_action('wp_body_open', 'wptypescript_body_js', 10);
+
+/**
+ * Output footer CSS & JS before closing </body> tag
+ */
+function wptypescript_footer_css() {
+    $val = get_option('wptypescript_footer_css', '');
+    if (!empty($val)) {
+        echo '<style id="wptypescript-footer-css">' . $val . '</style>';
+    }
+}
+add_action('wp_footer', 'wptypescript_footer_css', 99);
+
+function wptypescript_footer_js() {
+    $val = get_option('wptypescript_footer_js', '');
+    if (!empty($val)) {
+        echo '<script>' . $val . '</script>';
+    }
+}
+add_action('wp_footer', 'wptypescript_footer_js', 100);
 
 /**
  * Sanitize a CSS custom property value safely for inline style output.
@@ -1243,14 +1887,10 @@ function wptypescript_sanitize_opacity($value) {
 }
 
 /**
- * Output global layout styles
+ * Return layout CSS vars as a string
  */
-function wptypescript_layout_styles() {
+function wptypescript_get_layout_styles_css() {
     $container_width = get_option('wptypescript_container_width', '1200');
-    $layout_type = get_option('wptypescript_layout_type', 'full-width');
-    $header_style = get_option('wptypescript_header_style', 'standard');
-    
-    // Colors & Fonts
     $primary_color = get_option('wptypescript_primary_color', '#0073aa');
     $secondary_color = get_option('wptypescript_secondary_color', '#23282d');
     $text_color = get_option('wptypescript_text_color', '#333333');
@@ -1265,8 +1905,6 @@ function wptypescript_layout_styles() {
     $link_color = get_option('wptypescript_link_color', '#0073aa');
     $link_hover_color = get_option('wptypescript_link_hover_color', '#005b8f');
     $link_style = get_option('wptypescript_link_style', 'underline');
-    
-    // Typography
     $default_body_font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif';
     $default_heading_font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif';
     $h1_size = get_option('wptypescript_h1_size', '48');
@@ -1277,232 +1915,255 @@ function wptypescript_layout_styles() {
     $h6_size = get_option('wptypescript_h6_size', '18');
     $body_size = get_option('wptypescript_body_size', '16');
     $line_height = get_option('wptypescript_line_height', '1.6');
+    $h1_font = trim(get_option('wptypescript_h1_font_family', '')) ?: $default_heading_font;
+    $h2_font = trim(get_option('wptypescript_h2_font_family', '')) ?: $default_heading_font;
+    $h3_font = trim(get_option('wptypescript_h3_font_family', '')) ?: $default_heading_font;
+    $h4_font = trim(get_option('wptypescript_h4_font_family', '')) ?: $default_heading_font;
+    $h5_font = trim(get_option('wptypescript_h5_font_family', '')) ?: $default_heading_font;
+    $h6_font = trim(get_option('wptypescript_h6_font_family', '')) ?: $default_heading_font;
+    $p_font  = trim(get_option('wptypescript_p_font_family', '')) ?: $default_body_font;
+    $p_color = trim(get_option('wptypescript_p_color', '')) ?: $text_color;
 
-    // Per-heading fonts/weights/styles with fallbacks
-    $h1_font = get_option('wptypescript_h1_font_family', '');
-    $h2_font = get_option('wptypescript_h2_font_family', '');
-    $h3_font = get_option('wptypescript_h3_font_family', '');
-    $h4_font = get_option('wptypescript_h4_font_family', '');
-    $h5_font = get_option('wptypescript_h5_font_family', '');
-    $h6_font = get_option('wptypescript_h6_font_family', '');
-    $p_font  = get_option('wptypescript_p_font_family', '');
+    $props = array(
+        'container-width' => $container_width . 'px',
+        'primary-color' => $primary_color,
+        'secondary-color' => $secondary_color,
+        'text-color' => $text_color,
+        'background-color' => $background_color,
+        'link-color' => $link_color,
+        'link-hover-color' => $link_hover_color,
+        'link-style' => $link_style,
+        'background-image' => $background_image ? 'url(' . esc_url($background_image) . ')' : 'none',
+        'background-image-size' => $background_image_size,
+        'background-overlay-color' => $background_overlay_color ?: 'transparent',
+        'gradient-top-color' => $gradient_top_color ?: 'transparent',
+        'gradient-center-color' => $gradient_center_color ?: 'transparent',
+        'gradient-bottom-color' => $gradient_bottom_color ?: 'transparent',
+        'gradient-opacity' => $gradient_opacity,
+        'body-font' => $p_font,
+        'heading-font' => $h1_font,
+        'h1-font' => $h1_font,
+        'h2-font' => $h2_font,
+        'h3-font' => $h3_font,
+        'h4-font' => $h4_font,
+        'h5-font' => $h5_font,
+        'h6-font' => $h6_font,
+        'p-font' => $p_font,
+        'h1-color' => get_option('wptypescript_h1_color', ''),
+        'h2-color' => get_option('wptypescript_h2_color', ''),
+        'h3-color' => get_option('wptypescript_h3_color', ''),
+        'h4-color' => get_option('wptypescript_h4_color', ''),
+        'h5-color' => get_option('wptypescript_h5_color', ''),
+        'h6-color' => get_option('wptypescript_h6_color', ''),
+        'p-color' => $p_color,
+        'h1-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h1_letter_spacing', '')),
+        'h2-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h2_letter_spacing', '')),
+        'h3-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h3_letter_spacing', '')),
+        'h4-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h4_letter_spacing', '')),
+        'h5-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h5_letter_spacing', '')),
+        'h6-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_h6_letter_spacing', '')),
+        'p-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_p_letter_spacing', '')),
+        'h1-size' => $h1_size . 'px',
+        'h2-size' => $h2_size . 'px',
+        'h3-size' => $h3_size . 'px',
+        'h4-size' => $h4_size . 'px',
+        'h5-size' => $h5_size . 'px',
+        'h6-size' => get_option('wptypescript_h6_size', '16') . 'px',
+        'p-size' => get_option('wptypescript_p_size', '16') . 'px',
+        'body-size' => $body_size . 'px',
+        'line-height' => $line_height,
+        'h1-line-height' => get_option('wptypescript_h1_line_height', '1.2'),
+        'h2-line-height' => get_option('wptypescript_h2_line_height', '1.25'),
+        'h3-line-height' => get_option('wptypescript_h3_line_height', '1.3'),
+        'h4-line-height' => get_option('wptypescript_h4_line_height', '1.35'),
+        'h5-line-height' => get_option('wptypescript_h5_line_height', '1.4'),
+        'h6-line-height' => get_option('wptypescript_h6_line_height', '1.4'),
+        'p-line-height' => get_option('wptypescript_p_line_height', '1.6'),
+        'header-height' => get_option('wptypescript_header_height', '80') . 'px',
+        'sidebar-width' => get_option('wptypescript_sidebar_width', '300') . 'px',
+        'h1-weight' => get_option('wptypescript_h1_font_weight', 'inherit'),
+        'h2-weight' => get_option('wptypescript_h2_font_weight', 'inherit'),
+        'h3-weight' => get_option('wptypescript_h3_font_weight', 'inherit'),
+        'h4-weight' => get_option('wptypescript_h4_font_weight', 'inherit'),
+        'h5-weight' => get_option('wptypescript_h5_font_weight', 'inherit'),
+        'p-weight' => get_option('wptypescript_p_font_weight', 'inherit'),
+        'h1-style' => get_option('wptypescript_h1_font_style', 'normal'),
+        'h2-style' => get_option('wptypescript_h2_font_style', 'normal'),
+        'h3-style' => get_option('wptypescript_h3_font_style', 'normal'),
+        'h4-style' => get_option('wptypescript_h4_font_style', 'normal'),
+        'h5-style' => get_option('wptypescript_h5_font_style', 'normal'),
+        'p-style' => get_option('wptypescript_p_font_style', 'normal'),
+        'primary-button-font' => wptypescript_sanitize_css_value(trim(get_option('wptypescript_primary_button_font_family', '')) ?: $p_font),
+        'primary-button-weight' => get_option('wptypescript_primary_button_font_weight', 'inherit'),
+        'primary-button-style' => get_option('wptypescript_primary_button_font_style', 'normal'),
+        'primary-button-letter-spacing' => wptypescript_css_spacing(get_option('wptypescript_primary_button_letter_spacing', '')),
+        'primary-button-link-color' => get_option('wptypescript_primary_button_link_color', ''),
+        'primary-button-border-color' => get_option('wptypescript_primary_button_border_color', ''),
+        'primary-button-border-radius' => get_option('wptypescript_primary_button_border_radius', '0') . 'px',
+        'primary-button-font-icon' => get_option('wptypescript_primary_button_font_icon', 'none'),
+        'primary-button-type' => get_option('wptypescript_primary_button_type', 'filled'),
+        'primary-button-background-color' => get_option('wptypescript_primary_button_background_color', ''),
+        'primary-button-hover-link-color' => get_option('wptypescript_primary_button_hover_link_color', ''),
+        'primary-button-hover-type' => get_option('wptypescript_primary_button_hover_type', 'none'),
+        'primary-button-hover-background-color' => get_option('wptypescript_primary_button_hover_background_color', ''),
+    );
 
-    $h1_font = trim($h1_font) !== '' ? $h1_font : $default_heading_font;
-    $h2_font = trim($h2_font) !== '' ? $h2_font : $default_heading_font;
-    $h3_font = trim($h3_font) !== '' ? $h3_font : $default_heading_font;
-    $h4_font = trim($h4_font) !== '' ? $h4_font : $default_heading_font;
-    $h5_font = trim($h5_font) !== '' ? $h5_font : $default_heading_font;
-    $h6_font = trim($h6_font) !== '' ? $h6_font : $default_heading_font;
-    $p_font  = trim($p_font) !== '' ? $p_font : $default_body_font;
-
-    $h1_color = get_option('wptypescript_h1_color', '');
-    $h2_color = get_option('wptypescript_h2_color', '');
-    $h3_color = get_option('wptypescript_h3_color', '');
-    $h4_color = get_option('wptypescript_h4_color', '');
-    $h5_color = get_option('wptypescript_h5_color', '');
-    $h6_color = get_option('wptypescript_h6_color', '');
-    $p_color  = get_option('wptypescript_p_color', '');
-    $p_color  = trim($p_color) !== '' ? $p_color : $text_color;
-
-    $h1_letter_spacing = get_option('wptypescript_h1_letter_spacing', '');
-    $h2_letter_spacing = get_option('wptypescript_h2_letter_spacing', '');
-    $h3_letter_spacing = get_option('wptypescript_h3_letter_spacing', '');
-    $h4_letter_spacing = get_option('wptypescript_h4_letter_spacing', '');
-    $h5_letter_spacing = get_option('wptypescript_h5_letter_spacing', '');
-    $h6_letter_spacing = get_option('wptypescript_h6_letter_spacing', '');
-    $p_letter_spacing  = get_option('wptypescript_p_letter_spacing', '');
-
-    $h1_weight = get_option('wptypescript_h1_font_weight', 'inherit');
-    $h2_weight = get_option('wptypescript_h2_font_weight', 'inherit');
-    $h3_weight = get_option('wptypescript_h3_font_weight', 'inherit');
-    $h4_weight = get_option('wptypescript_h4_font_weight', 'inherit');
-    $h5_weight = get_option('wptypescript_h5_font_weight', 'inherit');
-    $p_weight  = get_option('wptypescript_p_font_weight', 'inherit');
-
-    $h1_style = get_option('wptypescript_h1_font_style', 'normal');
-    $h2_style = get_option('wptypescript_h2_font_style', 'normal');
-    $h3_style = get_option('wptypescript_h3_font_style', 'normal');
-    $h4_style = get_option('wptypescript_h4_font_style', 'normal');
-    $h5_style = get_option('wptypescript_h5_font_style', 'normal');
-    $h6_style = get_option('wptypescript_h6_font_style', 'normal');
-    $p_style  = get_option('wptypescript_p_font_style', 'normal');
-    
-    $h1_line_height = get_option('wptypescript_h1_line_height', '1.2');
-    $h2_line_height = get_option('wptypescript_h2_line_height', '1.25');
-    $h3_line_height = get_option('wptypescript_h3_line_height', '1.3');
-    $h4_line_height = get_option('wptypescript_h4_line_height', '1.35');
-    $h5_line_height = get_option('wptypescript_h5_line_height', '1.4');
-    $h6_line_height = get_option('wptypescript_h6_line_height', '1.4');
-    $p_line_height  = get_option('wptypescript_p_line_height', '1.6');
-    
-    // Header
-    $header_layout = get_option('wptypescript_header_layout', 'standard');
-    $header_height = get_option('wptypescript_header_height', '80');
-    
-    // Sidebar
-    $default_layout = get_option('wptypescript_default_layout', 'full-width');
-    $sidebar_width = get_option('wptypescript_sidebar_width', '300');
-    
-    ?>
-    <style>
-        :root {
-            --container-width: <?php echo esc_attr($container_width); ?>px;
-            --primary-color: <?php echo esc_attr($primary_color); ?>;
-            --secondary-color: <?php echo esc_attr($secondary_color); ?>;
-            --text-color: <?php echo esc_attr($text_color); ?>;
-            --background-color: <?php echo esc_attr($background_color); ?>;
-            --link-color: <?php echo esc_attr($link_color); ?>;
-            --link-hover-color: <?php echo esc_attr($link_hover_color); ?>;
-            --link-style: <?php echo esc_attr($link_style); ?>;
-            --background-image: <?php echo $background_image ? 'url(' . esc_url($background_image) . ')' : 'none'; ?>;
-            --background-image-size: <?php echo esc_attr($background_image_size); ?>;
-            --background-overlay-color: <?php echo esc_attr($background_overlay_color ? $background_overlay_color : 'transparent'); ?>;
-            --gradient-top-color: <?php echo esc_attr($gradient_top_color ? $gradient_top_color : 'transparent'); ?>;
-            --gradient-center-color: <?php echo esc_attr($gradient_center_color ? $gradient_center_color : 'transparent'); ?>;
-            --gradient-bottom-color: <?php echo esc_attr($gradient_bottom_color ? $gradient_bottom_color : 'transparent'); ?>;
-            --gradient-opacity: <?php echo esc_attr($gradient_opacity); ?>;
-            --body-font: <?php echo wptypescript_sanitize_css_value($p_font); ?>;
-            --heading-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
-            --h1-font: <?php echo wptypescript_sanitize_css_value($h1_font); ?>;
-            --h2-font: <?php echo wptypescript_sanitize_css_value($h2_font); ?>;
-            --h3-font: <?php echo wptypescript_sanitize_css_value($h3_font); ?>;
-            --h4-font: <?php echo wptypescript_sanitize_css_value($h4_font); ?>;
-            --h5-font: <?php echo wptypescript_sanitize_css_value($h5_font); ?>;
-            --h6-font: <?php echo wptypescript_sanitize_css_value($h6_font); ?>;
-            --p-font: <?php echo wptypescript_sanitize_css_value($p_font); ?>;
-            --h1-color: <?php echo esc_attr($h1_color); ?>;
-            --h2-color: <?php echo esc_attr($h2_color); ?>;
-            --h3-color: <?php echo esc_attr($h3_color); ?>;
-            --h4-color: <?php echo esc_attr($h4_color); ?>;
-            --h5-color: <?php echo esc_attr($h5_color); ?>;
-            --h6-color: <?php echo esc_attr($h6_color); ?>;
-            --p-color: <?php echo esc_attr($p_color); ?>;
-            --h1-letter-spacing: <?php echo trim($h1_letter_spacing) !== '' ? esc_attr($h1_letter_spacing) . 'px' : 'normal'; ?>;
-            --h2-letter-spacing: <?php echo trim($h2_letter_spacing) !== '' ? esc_attr($h2_letter_spacing) . 'px' : 'normal'; ?>;
-            --h3-letter-spacing: <?php echo trim($h3_letter_spacing) !== '' ? esc_attr($h3_letter_spacing) . 'px' : 'normal'; ?>;
-            --h4-letter-spacing: <?php echo trim($h4_letter_spacing) !== '' ? esc_attr($h4_letter_spacing) . 'px' : 'normal'; ?>;
-            --h5-letter-spacing: <?php echo trim($h5_letter_spacing) !== '' ? esc_attr($h5_letter_spacing) . 'px' : 'normal'; ?>;
-            --h6-letter-spacing: <?php echo trim($h6_letter_spacing) !== '' ? esc_attr($h6_letter_spacing) . 'px' : 'normal'; ?>;
-            --p-letter-spacing: <?php echo trim($p_letter_spacing) !== '' ? esc_attr($p_letter_spacing) . 'px' : 'normal'; ?>;
-            --h1-size: <?php echo esc_attr($h1_size); ?>px;
-            --h2-size: <?php echo esc_attr($h2_size); ?>px;
-            --h3-size: <?php echo esc_attr($h3_size); ?>px;
-            --h4-size: <?php echo esc_attr($h4_size); ?>px;
-            --h5-size: <?php echo esc_attr($h5_size); ?>px;
-            --h6-size: <?php echo esc_attr(get_option('wptypescript_h6_size', '16')); ?>px;
-            --p-size: <?php echo esc_attr(get_option('wptypescript_p_size', '16')); ?>px;
-            --body-size: <?php echo esc_attr($body_size); ?>px;
-            --line-height: <?php echo esc_attr($line_height); ?>;
-            --h1-line-height: <?php echo esc_attr($h1_line_height); ?>;
-            --h2-line-height: <?php echo esc_attr($h2_line_height); ?>;
-            --h3-line-height: <?php echo esc_attr($h3_line_height); ?>;
-            --h4-line-height: <?php echo esc_attr($h4_line_height); ?>;
-            --h5-line-height: <?php echo esc_attr($h5_line_height); ?>;
-            --h6-line-height: <?php echo esc_attr($h6_line_height); ?>;
-            --p-line-height: <?php echo esc_attr($p_line_height); ?>;
-            --header-height: <?php echo esc_attr($header_height); ?>px;
-            --sidebar-width: <?php echo esc_attr($sidebar_width); ?>px;
-            --h1-weight: <?php echo esc_attr($h1_weight); ?>;
-            --h2-weight: <?php echo esc_attr($h2_weight); ?>;
-            --h3-weight: <?php echo esc_attr($h3_weight); ?>;
-            --h4-weight: <?php echo esc_attr($h4_weight); ?>;
-            --h5-weight: <?php echo esc_attr($h5_weight); ?>;
-            --p-weight: <?php echo esc_attr($p_weight); ?>;
-            --h1-style: <?php echo esc_attr($h1_style); ?>;
-            --h2-style: <?php echo esc_attr($h2_style); ?>;
-            --h3-style: <?php echo esc_attr($h3_style); ?>;
-            --h4-style: <?php echo esc_attr($h4_style); ?>;
-            --h5-style: <?php echo esc_attr($h5_style); ?>;
-            --p-style: <?php echo esc_attr($p_style); ?>;
-        }
-        
-        </style>
-    <?php
+    $css = ":root {\n";
+    foreach ($props as $name => $value) {
+        $css .= "  --{$name}: {$value};\n";
+    }
+    $css .= "}\n";
+    return $css;
 }
-add_action('wp_head', 'wptypescript_layout_styles');
 
 /**
- * Output small inline stylesheet for conditional layout selectors
+ * Return conditional layout CSS as a string
  */
-function wptypescript_layout_conditionals() {
+function wptypescript_get_layout_conditionals_css() {
     $header_layout = get_option('wptypescript_header_layout', 'standard');
     $default_layout = get_option('wptypescript_default_layout', 'full-width');
     $layout_type = get_option('wptypescript_layout_type', 'full-width');
     $header_style = get_option('wptypescript_header_style', 'standard');
-    ?>
-    <style id="wptypescript-layout-conditionals">
-        <?php if ($header_layout === 'centered') : ?>
-        .site-header .container {
-            text-align: center;
-        }
 
-        .site-header .primary-navigation {
-            justify-content: center;
-        }
-        <?php elseif ($header_layout === 'inline') : ?>
-        .site-header .container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .site-header .site-title {
-            margin: 0;
-        }
-        <?php endif; ?>
-
-        <?php if ($default_layout === 'left-sidebar') : ?>
-        .site-content {
-            display: grid;
-            grid-template-columns: var(--sidebar-width) 1fr;
-            gap: 2rem;
-        }
-        <?php elseif ($default_layout === 'right-sidebar') : ?>
-        .site-content {
-            display: grid;
-            grid-template-columns: 1fr var(--sidebar-width);
-            gap: 2rem;
-        }
-        <?php endif; ?>
-
-        <?php if ($layout_type === 'boxed') : ?>
-        body {
-            background-color: #f0f0f0;
-        }
-
-        .site-wrapper {
-            max-width: var(--container-width);
-            margin: 0 auto;
-            background-color: #fff;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-        }
-        <?php elseif ($layout_type === 'wide') : ?>
-        .site-content {
-            max-width: 100%;
-            padding: 0;
-        }
-        <?php endif; ?>
-
-        <?php if ($header_style === 'sticky') : ?>
-        .site-header {
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        <?php elseif ($header_style === 'transparent') : ?>
-        .site-header {
-            background-color: transparent;
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 1000;
-        }
-        <?php endif; ?>
-    </style>
-    <?php
+    $css = '';
+    if ($header_layout === 'centered') {
+        $css .= ".site-header .container { text-align: center; }\n";
+        $css .= ".site-header .primary-navigation { justify-content: center; }\n";
+    } elseif ($header_layout === 'inline') {
+        $css .= ".site-header .container { display: flex; align-items: center; justify-content: space-between; }\n";
+        $css .= ".site-header .site-title { margin: 0; }\n";
+    }
+    if ($default_layout === 'left-sidebar') {
+        $css .= ".site-content { display: grid; grid-template-columns: var(--sidebar-width) 1fr; gap: 2rem; }\n";
+    } elseif ($default_layout === 'right-sidebar') {
+        $css .= ".site-content { display: grid; grid-template-columns: 1fr var(--sidebar-width); gap: 2rem; }\n";
+    }
+    if ($layout_type === 'boxed') {
+        $css .= "body { background-color: #f0f0f0; }\n";
+        $css .= ".site-wrapper { max-width: var(--container-width); margin: 0 auto; background-color: #fff; box-shadow: 0 0 20px rgba(0,0,0,0.1); }\n";
+    } elseif ($layout_type === 'wide') {
+        $css .= ".site-content { max-width: 100%; padding: 0; }\n";
+    }
+    if ($header_style === 'sticky') {
+        $css .= ".site-header { position: sticky; top: 0; z-index: 1000; }\n";
+    } elseif ($header_style === 'transparent') {
+        $css .= ".site-header { background-color: transparent; position: absolute; top: 0; left: 0; right: 0; z-index: 1000; }\n";
+    }
+    return $css;
 }
-add_action('wp_head', 'wptypescript_layout_conditionals');
+
+/**
+ * Helper: format letter-spacing value
+ */
+function wptypescript_css_spacing($val) {
+    return trim($val) !== '' ? $val . 'px' : 'normal';
+}
+
+/**
+ * Return block library CSS as a string
+ */
+function wptypescript_get_block_library_css() {
+    return ':root {
+  --wp-block-synced-color: #7a00df;
+  --wp-block-synced-color--rgb: 122,0,223;
+  --wp-bound-block-color: var(--wp-block-synced-color);
+  --wp-editor-canvas-background: #ddd;
+  --wp-admin-theme-color: #007cba;
+  --wp-admin-theme-color--rgb: 0,124,186;
+  --wp-admin-theme-color-darker-10: #006ba1;
+  --wp-admin-theme-color-darker-10--rgb: 0,107,160.5;
+  --wp-admin-theme-color-darker-20: #005a87;
+  --wp-admin-theme-color-darker-20--rgb: 0,90,135;
+  --wp-admin-border-width-focus: 2px;
+  --wp--preset--font-size--normal: 16px;
+  --wp--preset--font-size--huge: 42px;
+}
+.wp-element-button { cursor: pointer; }
+.has-very-light-gray-background-color { background-color: #eee; }
+.has-very-dark-gray-background-color { background-color: #313131; }
+.has-very-light-gray-color { color: #eee; }
+.has-very-dark-gray-color { color: #313131; }
+.has-vivid-green-cyan-to-vivid-cyan-blue-gradient-background { background: linear-gradient(135deg,#00d084,#0693e3); }
+.has-purple-crush-gradient-background { background: linear-gradient(135deg,#34e2e4,#4721fb 50%,#ab1dfe); }
+.has-hazy-dawn-gradient-background { background: linear-gradient(135deg,#faaca8,#dad0ec); }
+.has-subdued-olive-gradient-background { background: linear-gradient(135deg,#fafae1,#67a671); }
+.has-atomic-cream-gradient-background { background: linear-gradient(135deg,#fdd79a,#004a59); }
+.has-nightshade-gradient-background { background: linear-gradient(135deg,#330968,#31cdcf); }
+.has-midnight-gradient-background { background: linear-gradient(135deg,#020381,#2874fc); }
+.has-regular-font-size { font-size: 1em; }
+.has-larger-font-size { font-size: 2.625em; }
+.has-normal-font-size { font-size: var(--wp--preset--font-size--normal); }
+.has-huge-font-size { font-size: var(--wp--preset--font-size--huge); }
+.has-text-align-center { text-align: center; }
+.has-text-align-left { text-align: left; }
+.has-text-align-right { text-align: right; }
+.has-fit-text { white-space: nowrap !important; }
+.aligncenter { clear: both; }
+.items-justified-left { justify-content: flex-start; }
+.items-justified-center { justify-content: center; }
+.items-justified-right { justify-content: flex-end; }
+.items-justified-space-between { justify-content: space-between; }
+.screen-reader-text { word-wrap: normal !important; border: 0; clip-path: inset(50%); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; }
+.screen-reader-text:focus { background-color: #ddd; clip-path: none; color: #444; display: block; font-size: 1em; height: auto; left: 5px; line-height: normal; padding: 15px 23px 14px; text-decoration: none; top: 5px; width: auto; z-index: 100000; }
+html :where(.has-border-color) { border-style: solid; }
+html :where([style*=border-top-color]) { border-top-style: solid; }
+html :where([style*=border-right-color]) { border-right-style: solid; }
+html :where([style*=border-bottom-color]) { border-bottom-style: solid; }
+html :where([style*=border-left-color]) { border-left-style: solid; }
+html :where([style*=border-color]) { border-style: solid; }
+html :where([style*=border-width]) { border-style: solid; }
+html :where([style*=border-top-width]) { border-top-style: solid; }
+html :where([style*=border-right-width]) { border-right-style: solid; }
+html :where([style*=border-bottom-width]) { border-bottom-style: solid; }
+html :where([style*=border-left-width]) { border-left-style: solid; }
+html :where(img[class*=wp-image-]) { height: auto; max-width: 100%; }
+:where(figure) { margin: 0 0 1em; }
+html :where(.is-position-sticky) { --wp-admin--admin-bar--position-offset: var(--wp-admin--admin-bar--height, 0px); }
+@media (min-resolution:192dpi) { :root { --wp-admin-border-width-focus: 1.5px; } }
+@media screen and (max-width:600px) { html :where(.is-position-sticky) { --wp-admin--admin-bar--position-offset: 0px; } }
+';
+}
+
+/**
+ * Return any cached inline CSS captured from late-registered handles.
+ */
+function wptypescript_get_captured_inline_css() {
+    return get_option('wptypescript_captured_inline_css', '');
+}
+
+/**
+ * Serve all former inline CSS as a single linked stylesheet
+ */
+function wptypescript_serve_dynamic_css() {
+    if (isset($_GET['wptypescript_dynamic_css'])) {
+        header('Content-Type: text/css');
+        echo wptypescript_get_block_library_css();
+        echo "\n";
+        echo wptypescript_get_layout_styles_css();
+        echo "\n";
+        echo wptypescript_get_layout_conditionals_css();
+        $captured = wptypescript_get_captured_inline_css();
+        if ($captured !== '') {
+            echo "\n" . $captured . "\n";
+        }
+        exit;
+    }
+}
+add_action('template_redirect', 'wptypescript_serve_dynamic_css');
+
+/**
+ * Enqueue the dynamic CSS stylesheet (replaces previous inline <style> tags)
+ */
+function wptypescript_enqueue_dynamic_css() {
+    $theme_version = wp_get_theme()->get('Version');
+    wp_enqueue_style(
+        'wptypescript-dynamic',
+        home_url('/?wptypescript_dynamic_css=1'),
+        array('wptypescript-styles', 'wptypescript-root-style'),
+        $theme_version
+    );
+}
+add_action('wp_enqueue_scripts', 'wptypescript_enqueue_dynamic_css', 200);
 
 /**
  * Enqueue Google Fonts for any selected font options
@@ -1552,6 +2213,11 @@ function wptypescript_enqueue_google_fonts() {
         array(
             'font' => get_option('wptypescript_p_font_family', ''),
             'weights' => wptypescript_parse_font_weight(get_option('wptypescript_p_font_weight', 'inherit')),
+            'google' => true,
+        ),
+        array(
+            'font' => get_option('wptypescript_primary_button_font_family', ''),
+            'weights' => wptypescript_parse_font_weight(get_option('wptypescript_primary_button_font_weight', 'inherit')),
             'google' => true,
         ),
     );

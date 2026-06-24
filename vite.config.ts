@@ -8,6 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/ts/main.ts'),
+        admin: resolve(__dirname, 'src/ts/admin.ts'),
         styles: resolve(__dirname, 'src/scss/main.scss'),
       },
       output: {

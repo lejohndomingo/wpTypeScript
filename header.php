@@ -19,7 +19,10 @@ if (!defined('ABSPATH')) {
 <body <?php body_class(); ?>>
 <?php wp_body_open(); ?>
 
+<div id="wp-react-root"></div>
+
 <div class="site-wrapper">
+<?php wptypescript_top_header(); ?>
 <header class="site-header">
     <div class="container">
         <?php if (has_custom_logo()) : ?>

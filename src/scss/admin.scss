@@ -1,0 +1,165 @@
+// Admin Theme Styles - Dashboard & Theme Options
+
+/* === Dashboard === */
+#adminmenu .toplevel_page_wptypescript-options {
+  .wp-menu-image img {
+    width: 20px;
+    height: 20px;
+    padding: 6px 0;
+  }
+
+  .wp-menu-image.dashicons-before::before {
+    content: '\f111';
+    font-size: 18px;
+  }
+}
+
+.wptypescript-dashboard-widget {
+  background: #fff;
+  border: 1px solid #c3c4c7;
+  border-radius: 4px;
+  padding: 16px;
+
+  h2 {
+    font-size: 14px;
+    margin: 0 0 12px;
+    padding: 0 0 8px;
+    border-bottom: 1px solid #f0f0f1;
+    color: #1d2327;
+  }
+
+  ul {
+    margin: 0;
+    list-style: none;
+  }
+
+  li {
+    padding: 4px 0;
+    color: #50575e;
+    font-size: 13px;
+
+    a {
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+}
+
+/* === Theme Options Page === */
+.wptypescript-tabs {
+  margin: 20px 0 0;
+  border-bottom: 1px solid #c3c4c7;
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+
+  .tab-button {
+    margin: 0;
+    background: #f0f0f1;
+    border: 1px solid #c3c4c7;
+    border-bottom: none;
+    padding: 10px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    color: #50575e;
+    border-radius: 4px 4px 0 0;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: #e8e8e9;
+      color: #1d2327;
+    }
+
+    &.active {
+      background: #fff;
+      color: #1d2327;
+      border-bottom-color: #fff;
+      margin-bottom: -1px;
+      position: relative;
+    }
+  }
+}
+
+.wptypescript-options-container {
+  background: #fff;
+  border: 1px solid #c3c4c7;
+  border-top: none;
+  padding: 20px;
+
+  .card {
+    max-width: 100% !important;
+  }
+}
+
+.tab-content {
+  display: none;
+
+  &.active {
+    display: block;
+  }
+}
+
+.wptypescript-heading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: end;
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #646970;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    select,
+    input[type='number'],
+    input[type='text'] {
+      width: 100%;
+    }
+
+    input[type='number'].small-text {
+      width: 80px;
+    }
+  }
+}
+
+.wptypescript-gradient-preview {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wptypescript-background-preview-wrap {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.wptypescript-link-preview-wrap {
+  padding: 12px 16px;
+  background: #f6f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+
+  .wptypescript-link-preview {
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  .description {
+    margin-top: 8px;
+  }
+}

@@ -37,20 +37,25 @@ wpTypeScript/
 ## Installation
 
 1. **Install Dependencies**
+
    ```bash
    npm install
    ```
 
 2. **Development Mode**
+
    ```bash
    npm run dev
    ```
+
    This starts Vite's development server with HMR enabled.
 
 3. **Build for Production**
+
    ```bash
    npm run build
    ```
+
    This compiles TypeScript and SCSS to the `assets/` directory.
 
 4. **Type Checking**
@@ -68,6 +73,7 @@ wpTypeScript/
 ## WordPress Integration
 
 The theme automatically enqueues compiled assets:
+
 - JavaScript: `assets/js/main.js`
 - CSS: `assets/css/styles.css`
 
@@ -92,13 +98,14 @@ Create new `.scss` files in `src/scss/` and import them in `main.scss`:
 ## Production Deployment
 
 Before deploying:
+
 1. Run `npm run build` to compile assets
 2. Commit the compiled `assets/` directory
 3. Deploy the theme to your WordPress installation
 
 ## Requirements
 
-- Node.js 18+ 
+- Node.js 18+
 - PHP 7.4+
 - WordPress 5.0+
 

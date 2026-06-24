@@ -17,6 +17,6 @@
     "jsx": "preserve",
     "types": ["node"]
   },
-  "include": ["src/ts"],
+  "include": ["src/ts", "src/types"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
