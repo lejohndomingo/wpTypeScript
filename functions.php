@@ -150,11 +150,12 @@ add_filter('block_categories_all', function ($categories) {
         'slug'  => 'wptypescript',
         'title' => __('Custom Blocks', 'wptypescript'),
     );
+    error_log('BLOCK CATEGORIES: ' . json_encode(array_column($categories, 'slug')));
     return $categories;
 });
 
 /**
- * Register Gutenberg blocks
+ * Register Gutenberg blocks and custom block patterns
  */
 function wptypescript_register_blocks() {
     $theme_dir = get_template_directory();
@@ -211,7 +212,20 @@ function wptypescript_register_blocks() {
             }
         }
 
+        // Front-end script (viewScript)
+        $view_script_handles = array();
+        if (!empty($metadata['viewScript'])) {
+            $rel  = str_replace('file:', '', $metadata['viewScript']);
+            $path = $block_dir . '/' . $rel;
+            if (file_exists($path)) {
+                $handle = $handle_base . '-view';
+                wp_register_script($handle, $block_uri . '/' . $rel, [], filemtime($path), true);
+                $view_script_handles[] = $handle;
+            }
+        }
+
         $args = array(
+            'api_version'             => $metadata['apiVersion'] ?? 1,
             'title'                   => $metadata['title'] ?? '',
             'description'             => $metadata['description'] ?? '',
             'category'                => $metadata['category'] ?? 'wptypescript',
@@ -220,15 +234,65 @@ function wptypescript_register_blocks() {
             'textdomain'              => $metadata['textdomain'] ?? 'wptypescript',
             'attributes'              => $metadata['attributes'] ?? array(),
             'supports'                => $metadata['supports'] ?? array(),
+            'inserter'                => $metadata['inserter'] ?? true,
             'editor_script_handles'   => $editor_script_handles,
             'editor_style_handles'    => $editor_style_handles,
             'style_handles'           => $style_handles,
+            'view_script_handles'     => $view_script_handles,
         );
 
         register_block_type($block_name, $args);
     }
+
+    register_block_pattern_category('wptypescript', array(
+        'label' => __('Custom Blocks', 'wptypescript'),
+    ));
+
+    $pattern_blocks = array(
+        'wptypescript/hero-section-pattern' => __('Hero Section Pattern', 'wptypescript'),
+        'wptypescript/services-section'     => __('Services Section', 'wptypescript'),
+        'wptypescript/landing-page'         => __('Landing Page', 'wptypescript'),
+        'wptypescript/blog-post-layout'     => __('Blog Post Layout', 'wptypescript'),
+    );
+    foreach ($pattern_blocks as $name => $title) {
+        register_block_type($name, array(
+            'title'                 => $title,
+            'category'              => 'wptypescript',
+            'editor_script_handles' => array('wptypescript-section-pattern-editor'),
+        ));
+    }
 }
 add_action('init', 'wptypescript_register_blocks');
+add_action('init', function () {
+    $registry = WP_Block_Type_Registry::get_instance();
+    $blocks = ['wptypescript/team-member', 'wptypescript/cta', 'wptypescript/testimonial', 'wptypescript/slider-carousel', 'wptypescript/hero-section', 'wptypescript/hero-section-pattern'];
+    $status = array_map(fn($b) => $registry->is_registered($b) ? 'Y' : 'N', $blocks);
+    error_log('DM WT: ' . implode(' ', array_map(fn($b, $s) => basename($b) . '=' . $s, $blocks, $status)));
+}, 999);
+
+add_action('enqueue_block_editor_assets', function () {
+    $script_path = get_template_directory() . '/assets/js/editor.js';
+    if (file_exists($script_path)) {
+        wp_enqueue_script(
+            'wptypescript-editor',
+            get_template_directory_uri() . '/assets/js/editor.js',
+            ['wp-blocks', 'wp-data', 'wp-dom-ready'],
+            filemtime($script_path),
+            true
+        );
+    }
+
+    $sp_script_path = get_template_directory() . '/blocks/section-pattern/build/index.js';
+    if (file_exists($sp_script_path)) {
+        wp_enqueue_script(
+            'wptypescript-section-pattern-editor',
+            get_template_directory_uri() . '/blocks/section-pattern/build/index.js',
+            ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-i18n', 'wp-components'],
+            filemtime($sp_script_path),
+            false
+        );
+    }
+});
 
 /**
  * Capture AND clear ALL inline styles right before they are printed.
@@ -2305,3 +2369,38 @@ function wptypescript_is_known_google_font($font_name, $known_fonts) {
     return false;
 }
 add_action('wp_enqueue_scripts', 'wptypescript_enqueue_google_fonts');
+/**
+ * Debug endpoint
+ */
+add_action('rest_api_init', function () {
+    register_rest_route('wptypescript/v1', '/debug', array(
+        'methods' => 'GET',
+        'callback' => function () {
+            global $wp_scripts;
+            $registry = WP_Block_Type_Registry::get_instance();
+            $blocks = array();
+            foreach (['wptypescript/team-member', 'wptypescript/cta', 'wptypescript/testimonial'] as $name) {
+                $bt = $registry->get_registered($name);
+                if ($bt) {
+                    $blocks[$name] = array(
+                        'title' => $bt->title,
+                        'category' => $bt->category,
+                        'editor_script_handles' => $bt->editor_script_handles,
+                    );
+                } else {
+                    $blocks[$name] = 'NOT REGISTERED';
+                }
+            }
+            // Check if scripts are registered
+            if ($wp_scripts) {
+                foreach (['wptypescript-team-member-editor', 'wptypescript-cta-editor', 'wptypescript-testimonial-editor'] as $h) {
+                    $blocks['script_' . $h] = isset($wp_scripts->registered[$h]) ? 'yes' : 'no';
+                }
+            } else {
+                $blocks['wp_scripts'] = 'not available';
+            }
+            return $blocks;
+        },
+        'permission_callback' => '__return_true',
+    ));
+});

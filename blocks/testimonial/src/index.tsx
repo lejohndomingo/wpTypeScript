@@ -4,6 +4,7 @@ import Edit from './edit';
 import Save from './save';
 
 registerBlockType('wptypescript/testimonial', {
+  apiVersion: 3,
   title: __('Testimonial', 'wptypescript'),
   description: __('A customer testimonial with quote, author, and optional image.', 'wptypescript'),
   icon: 'format-quote',

@@ -4,6 +4,7 @@ import Edit from './edit';
 import Save from './save';
 
 registerBlockType('wptypescript/team-member', {
+  apiVersion: 3,
   title: __('Team Member', 'wptypescript'),
   description: __('A lightweight team member card. Add content with core blocks, then save as a reusable block.', 'wptypescript'),
   icon: 'groups',

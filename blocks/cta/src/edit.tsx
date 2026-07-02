@@ -15,7 +15,6 @@ interface CtaAttributes {
 
 export default function Edit({ attributes, setAttributes }: BlockEditProps<CtaAttributes>) {
   const { title, description, buttonText, buttonUrl, alignment } = attributes;
-  const textAlign = alignment as Alignment;
 
   return (
     <div {...useBlockProps()}>
@@ -42,7 +41,7 @@ export default function Edit({ attributes, setAttributes }: BlockEditProps<CtaAt
         </ToolbarGroup>
       </BlockControls>
 
-      <div className="wptypescript-cta" style={{ textAlign }}>
+      <div className="wptypescript-cta" style={{ textAlign: alignment }}>
         <RichText
           tagName="h2"
           value={title}

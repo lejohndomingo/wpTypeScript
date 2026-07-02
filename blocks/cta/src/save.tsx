@@ -14,11 +14,10 @@ interface CtaAttributes {
 
 export default function Save({ attributes }: BlockSaveProps<CtaAttributes>) {
   const { title, description, buttonText, buttonUrl, alignment } = attributes;
-  const textAlign = alignment as Alignment;
 
   return (
     <div {...useBlockProps.save()}>
-      <div className="wptypescript-cta" style={{ textAlign }}>
+      <div className="wptypescript-cta" style={{ textAlign: alignment }}>
         {title && <RichText.Content tagName="h2" value={title} />}
 
         {description && <RichText.Content tagName="p" value={description} />}

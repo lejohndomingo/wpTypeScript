@@ -4,6 +4,7 @@ import Edit from './edit';
 import Save from './save';
 
 registerBlockType('wptypescript/cta', {
+  apiVersion: 3,
   title: __('Call to Action', 'wptypescript'),
   description: __('A customizable call-to-action block.', 'wptypescript'),
   icon: 'megaphone',

@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'src/ts/main.ts'),
         admin: resolve(__dirname, 'src/ts/admin.ts'),
+        editor: resolve(__dirname, 'src/ts/editor.ts'),
         styles: resolve(__dirname, 'src/scss/main.scss'),
       },
       output: {

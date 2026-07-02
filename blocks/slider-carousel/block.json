@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "wptypescript/slider-carousel",
+  "version": "1.0.0",
+  "title": "Slider Carousel",
+  "category": "wptypescript",
+  "icon": "slides",
+  "description": "A responsive image and content carousel with navigation and autoplay.",
+  "keywords": ["slider", "carousel", "slideshow", "gallery"],
+  "textdomain": "wptypescript",
+  "attributes": {
+    "autoplay": {
+      "type": "boolean",
+      "default": false
+    },
+    "autoplaySpeed": {
+      "type": "number",
+      "default": 5000
+    },
+    "showArrows": {
+      "type": "boolean",
+      "default": true
+    },
+    "showDots": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "supports": {
+    "align": ["wide", "full"],
+    "html": false,
+    "color": {
+      "background": true,
+      "text": true
+    }
+  },
+  "editorScript": "file:./build/index.js",
+  "editorStyle": "file:./build/index.css",
+  "style": "file:./build/style-index.css",
+  "viewScript": "file:./view.js"
+}
